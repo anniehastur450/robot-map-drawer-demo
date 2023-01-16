@@ -3,6 +3,7 @@ import { h, attr, events } from './dom-helper.js';
 const fallbackConfig = {
   mapImgUrl: null, //  required
   mapSize: null, // required, [w, h]
+  bgColor: '#222',
   // resize: false,
   unit: 'm',
   // units: {
@@ -66,6 +67,7 @@ class RobotMapDrawer {
     this.doms = {};
     this.ratios = {};
     this.viewAnimations = null;
+    // this.previous = {};
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -84,6 +86,7 @@ class RobotMapDrawer {
   }
   setZoom(next, cursor) {
     if (!this.doms.zoomInput.disabled) {
+      // cancel editing
       this.doms.zoomInput.disabled = true;
     }
     let [dx, dy] = [0, 0];
@@ -126,13 +129,21 @@ class RobotMapDrawer {
     });
     resizeObserver.observe(el);
   }
-  registerCameraEl(el) {
-    h`<img width="0" height="0" class="w-full h-full">`
-      .let((el) => (el.src = this.config.mapImgUrl))
-      .attach(el);
-    this.doms.camera = el;
-    // updateCamera should be run after screenPxByMapUnit initialized
-  }
+  // comparePrevious(next) {
+  //   const changes = {};
+  //   for (const [k, v] of Object.entries(next)) {
+  //     changes[k] = this.previous[k] !== v;
+  //   }
+  //   changes.any = Object.values(changes).some((x) => x);
+  //   return {
+  //     changes,
+  //     updatePrevious: () => {
+  //       for (const [k, v] of Object.entries(next)) {
+  //         this.previous[k] = v;
+  //       }
+  //     },
+  //   };
+  // }
   updateCamera() {
     const el = this.doms.camera;
     const [mapW, mapH] = this.config.mapSize;
@@ -163,11 +174,11 @@ class RobotMapDrawer {
     );
     scaleText.textContent = `${closest} ${this.config.unit}`;
   }
+  /* other names: kinetic scrolling */
   startInertiaDragging(velocityX, velocityY) {
     const request = (x) => requestAnimationFrame(x);
     const cancel = (x) => cancelAnimationFrame(x);
     this.viewAnimations?.stop();
-    // other names: kinetic scrolling
     const brakingTime = 750; // ms
     let [sx, sy] = [Math.sign(velocityX), Math.sign(velocityY)];
     let [vx, vy] = [Math.abs(velocityX), Math.abs(velocityY)];
@@ -346,15 +357,20 @@ class RobotMapDrawer {
         </div>
 
         <!-- camera and view -->
-        <div class="absolute w-full h-full bg-[#222] flex justify-center items-center overflow-hidden">
+        <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden"
+        ${attr((el) => el.style.setProperty('--bg', this.config.bgColor))} >
           <div class="w-[var(--aspect-w)] h-[var(--aspect-h)]">
             <div class="w-full h-full transition-transform origin-center translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
-            ${attr((el) => this.registerCameraEl(el))} ></div>
+            ${attr((el) => (this.doms.camera = el))} >
+              <img width="0" height="0" class="absolute w-full h-full"
+              ${attr((el) => (el.src = this.config.mapImgUrl))} >
+
+              <!-- marker layer -->
+              ${this.markerList.getEl()}
+
+            </div>
           </div>
         </div>
-
-        <!-- marker layer -->
-        ${this.markerList.getEl()}
 
         <!-- scale bar -->
         <div class="absolute bg-white/50 px-1 bottom-2 right-2 z-50 pointer-events-none">
@@ -371,6 +387,11 @@ class RobotMapDrawer {
       .let((el) => this.registerEl(el))
       .attach(target);
   }
+
+  //////////////////////////////////////////////////////
+  /* marker list and helper functions for marker list */
+  //////////////////////////////////////////////////////
+
   markerList = new MarkerList(this);
 }
 
@@ -416,13 +437,19 @@ class MarkerList {
   }
   getEl() {
     return h`
-      <div class="absolute w-full h-full flex justify-center items-center overflow-hidden">
-        <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative"
-        ${attr((el) => (this.doms.container = el))} ></div>
-      </div>
+      <div class="absolute w-full h-full bg-amber/50"></div>
     `.let((el) => (this.doms.el = el));
   }
+  // getEl() {
+  //   return h`
+  //     <div class="absolute w-full h-full flex justify-center items-center overflow-hidden">
+  //       <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative"
+  //       ${attr((el) => (this.doms.container = el))} ></div>
+  //     </div>
+  //   `.let((el) => (this.doms.el = el));
+  // }
   updateMarkerCamera() {
+    return;
     const root = this.doms.container;
     const rect = root.getBoundingClientRect();
     if (root.children.length != this.markers.length) {
