@@ -1,4 +1,5 @@
 import { h, attr, events } from './dom-helper.js';
+import { mergeSolver } from './merge-solver.js';
 
 const fallbackConfig = {
   mapImgUrl: null, //  required
@@ -18,6 +19,7 @@ const fallbackConfig = {
      */ 125, 150, 175, 200, 250, 300, 400, 500, /*
      */ 750, 1000, 1500, 2000,
   ],
+  mergingPx: 50,
 };
 
 /* calculate cursor velocity in last [ms] ms */
@@ -57,6 +59,25 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function comparePrevious(previous, next) {
+  const changes = {};
+  for (const [k, v] of Object.entries(next)) {
+    changes[k] = this.previous[k] !== v;
+  }
+  changes.any = (...keys) => {
+    if (keys.length === 0) keys = next.keys();
+    return keys.some((k) => changes[k]);
+  };
+  return {
+    changes,
+    updatePrevious: () => {
+      for (const [k, v] of Object.entries(next)) {
+        this.previous[k] = v;
+      }
+    },
+  };
+}
+
 class RobotMapDrawer {
   constructor(config) {
     this.config = { ...fallbackConfig, ...config };
@@ -67,7 +88,6 @@ class RobotMapDrawer {
     this.doms = {};
     this.ratios = {};
     this.viewAnimations = null;
-    // this.previous = {};
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -129,29 +149,18 @@ class RobotMapDrawer {
     });
     resizeObserver.observe(el);
   }
-  // comparePrevious(next) {
-  //   const changes = {};
-  //   for (const [k, v] of Object.entries(next)) {
-  //     changes[k] = this.previous[k] !== v;
-  //   }
-  //   changes.any = Object.values(changes).some((x) => x);
-  //   return {
-  //     changes,
-  //     updatePrevious: () => {
-  //       for (const [k, v] of Object.entries(next)) {
-  //         this.previous[k] = v;
-  //       }
-  //     },
-  //   };
-  // }
   updateCamera() {
     const el = this.doms.camera;
     const [mapW, mapH] = this.config.mapSize;
     const [x, y] = this.camera.offset;
-    el.getAnimations().forEach((x) => x.finish());
+    el.getAnimations({ subtree: true }).forEach((x) => {
+      if (x.transitionProperty === 'transform') {
+        x.finish();
+      }
+    });
     el.style.setProperty('--x', `${(x / mapW) * this.camera.zoom}%`);
     el.style.setProperty('--y', `${(y / mapH) * this.camera.zoom}%`);
-    el.style.setProperty('--s', `${this.camera.zoom}%`);
+    el.style.setProperty('--s', `${this.camera.zoom / 100}`);
     this.doms.zoom.textContent = `${this.camera.zoom}%`;
     this.updateScaleBar();
     this.markerList.updateMarkerCamera();
@@ -359,8 +368,8 @@ class RobotMapDrawer {
         <!-- camera and view -->
         <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden"
         ${attr((el) => el.style.setProperty('--bg', this.config.bgColor))} >
-          <div class="w-[var(--aspect-w)] h-[var(--aspect-h)]">
-            <div class="w-full h-full transition-transform origin-center translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
+          <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] flex justify-center items-center">
+            <div class="absolute w-full h-full transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
             ${attr((el) => (this.doms.camera = el))} >
               <img width="0" height="0" class="absolute w-full h-full"
               ${attr((el) => (el.src = this.config.mapImgUrl))} >
@@ -397,7 +406,7 @@ class RobotMapDrawer {
 
 //////////////////////// MARKER LIST ////////////////////////
 
-const fallbackMarkerListOptions = {
+const fallbackListViewOptions = {
   /*
     origin:
       * top-left
@@ -437,7 +446,12 @@ class MarkerList {
   }
   getEl() {
     return h`
-      <div class="absolute w-full h-full bg-amber/50"></div>
+      <div class="absolute w-full h-full bg-amber/50">
+        <div class="absolute w-full h-full"
+        ${attr((el) => (this.doms.markers = el))} ></div>
+        <div class="absolute w-full h-full"
+        ${attr((el) => (this.doms.covers = el))} ></div>
+      </div>
     `.let((el) => (this.doms.el = el));
   }
   // getEl() {
@@ -449,8 +463,7 @@ class MarkerList {
   //   `.let((el) => (this.doms.el = el));
   // }
   updateMarkerCamera() {
-    return;
-    const root = this.doms.container;
+    const root = this.doms.markers;
     const rect = root.getBoundingClientRect();
     if (root.children.length != this.markers.length) {
       for (const ch of root.children) {
@@ -458,23 +471,52 @@ class MarkerList {
       }
       for (const marker of this.markers) {
         h`
-          <div class="absolute z-40 -translate-1/2 left-[var(--x)] top-[var(--y)] transition-all cursor-pointer pointer-events-none bg-amber/50"></div>
+          <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform bg-amber/50"></div>
         `
           .let((el) => (marker.el = el))
           .attach(root);
       }
     }
-    const [ox, oy] = this.drawer.camera.offset;
-    const zoomed = this.drawer.zoomedRatioScreenPx;
+    const [mapW, mapH] = this.drawer.config.mapSize;
     for (const marker of this.markers) {
       const { id, x, y, el } = marker;
       el.textContent = id;
-      const sx = rect.width / 2 + (x + ox) * zoomed;
-      const sy = rect.height / 2 + (y + oy) * zoomed;
-      el.getAnimations().forEach((x) => x.finish());
+      // el.getAnimations().forEach((x) => x.finish());
       // why use % instead of px? answer: avoid transition animation when changing aspect
-      el.style.setProperty('--x', `${(sx / rect.width) * 100}%`);
-      el.style.setProperty('--y', `${(sy / rect.height) * 100}%`);
+      el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+      el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+    }
+    const zoomed = this.drawer.zoomedRatioScreenPx;
+    if (!zoomed) {
+      // TOFIX: this is caused by addMarker before value init
+      console.warn('zoomedRatioScreenPx not initialized');
+      return;
+    }
+    const points = this.markers.map(({ x, y }) => [x, y]);
+    const merging = this.drawer.config.mergingPx / zoomed;
+    const res = mergeSolver(points, merging, Infinity);
+    console.log(res);
+    const root2 = this.doms.covers;
+    root2.innerHTML = '';
+    const minR = this.drawer.config.mergingPx;
+    for (const cover of res.covers) {
+      const [x, y, r] = cover.circle;
+      h`
+        <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition- rounded-full bg-black/50"
+        ${attr(el => {
+          el.style.setProperty('--d', `${Math.max(r * 2 * zoomed, this.drawer.config.mergingPx)}px`)
+          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`)
+          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`)
+        })} ></div>
+      `.attach(root2)
+      h`
+        <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition-transform,width,height rounded-full bg-blue/50"
+        ${attr(el => {
+          el.style.setProperty('--d', `${r * 2 * zoomed}px`)
+          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`)
+          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`)
+        })} ></div>
+      `.attach(root2)
     }
   }
   setPendingUpdate() {
@@ -517,7 +559,7 @@ function parseOrigin(mapW, mapH, origin) {
 class MarkerListView {
   constructor(mainList, options) {
     this.mainList = mainList;
-    this.options = { ...fallbackMarkerListOptions, ...options };
+    this.options = { ...fallbackListViewOptions, ...options };
     if (typeof this.options.origin === 'string') {
       const [mapW, mapH] = this.mainList.drawer.config.mapSize;
       this.options.origin = parseOrigin(mapW, mapH, this.options.origin);
