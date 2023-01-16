@@ -2,8 +2,8 @@ import { h, attr, events } from './dom-helper.js';
 
 const fallbackConfig = {
   mapImgUrl: null, //  required
-  mapSize: null, // required
-  resize: false,
+  mapSize: null, // required, [w, h]
+  // resize: false,
   unit: 'm',
   // units: {
   //   km: [1000, 'm'],
@@ -36,11 +36,12 @@ function calculateVelocity(trails, ms) {
       dt += ddt;
       dx += (ddt / (t2 - t)) * (x2 - x);
       dy += (ddt / (t2 - t)) * (y2 - y);
-    }
-    if (dt >= ms) {
       break;
     }
   }
+  // this is a upper cap for speed (min dt 1 ms),
+  // and also avoid the situation when dt = 0
+  dt = Math.max(1, dt);
   return {
     dt,
     dx,

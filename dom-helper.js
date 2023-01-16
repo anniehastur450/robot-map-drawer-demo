@@ -3,6 +3,9 @@ function h(strings, ...values) {
   function isattr(x) {
     return !!x[Symbol.for('isattr')];
   }
+  function ishtml(x) {
+    return !!x[Symbol.for('ishtml')];
+  }
 
   const replacements = [];
   let html = strings[0];
@@ -15,7 +18,7 @@ function h(strings, ...values) {
         v.fn(e);
       });
       html += ` ${attr} `;
-    } else {
+    } else if (ishtml(v) || (Array.isArray(v) && v.every(ishtml))) {
       const className = `__h_replacement_${i}`;
       if (!Array.isArray(v)) v = [v];
       replacements.push((div) => {
@@ -23,6 +26,8 @@ function h(strings, ...values) {
         e.replaceWith(...v.map((x) => x.el));
       });
       html += `<span class="${className}"></span>`;
+    } else {
+      html += v;
     }
     html += strings[i + 1];
   });
@@ -40,6 +45,7 @@ function h(strings, ...values) {
       target.appendChild(handle.el);
     },
     el: div.firstElementChild ?? div.firstChild,
+    [Symbol.for('ishtml')]: true,
   };
 
   return handle;
