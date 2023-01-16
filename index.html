@@ -1,0 +1,58 @@
+<<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Robot Map Drawer</title>
+    <script
+      defer
+      src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"
+      integrity="sha384-rOA1PnstxnOBLzCLMcre8ybwbTmemjzdNlILg8O7z1lUkLXozs4DHonlDtnE7fpc"
+      crossorigin="anonymous"
+    ></script>
+    <script>
+      // pass unocss options
+      window.__unocss = {
+        shortcuts: [
+          // https://github.com/antfu/handle/blob/main/unocss.config.ts
+          {
+            btn: 'b-0 b-none m-0 p-0 font-sans color-inherit bg-transparent cursor-pointer',
+          },
+        ],
+        rules: [
+          // custom rules...
+        ],
+        // presets: [
+        //   // custom presets...
+        // ],
+        // ...
+      };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@unocss/runtime"></script>
+    <style>
+      /* https://unpkg.com/tailwindcss@3.2.4/src/css/preflight.css */
+      * {
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div>
+      Robot Map Drawer
+      <div id="main-drawer" class="aspect-80/36 w-full"></div>
+    </div>
+    <br />
+    <div>
+      <h2>Debug</h2>
+      <script>
+        window.el = () => document.getElementById('main-drawer');
+      </script>
+      <button onclick="el().style.aspectRatio='4/3'">aspect-4/3</button>
+      <button onclick="el().style.aspectRatio='16/9'">aspect-16/9</button>
+      <button onclick="el().style.aspectRatio='21/5'">aspect-21/5</button>
+      <div id="debug"></div>
+    </div>
+  </body>
+</html>

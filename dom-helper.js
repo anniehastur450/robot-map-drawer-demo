@@ -1,0 +1,63 @@
+// dom by string generator
+function h(strings, ...values) {
+  function isattr(x) {
+    return !!x[Symbol.for('isattr')];
+  }
+
+  const replacements = [];
+  let html = strings[0];
+  values.forEach((v, i) => {
+    if (isattr(v)) {
+      const attr = `data-h-replacement-${i}`;
+      replacements.push((div) => {
+        const [e] = div.querySelectorAll(`[${attr}]`);
+        e.removeAttribute(attr);
+        v.fn(e);
+      });
+      html += ` ${attr} `;
+    } else {
+      const className = `__h_replacement_${i}`;
+      if (!Array.isArray(v)) v = [v];
+      replacements.push((div) => {
+        const [e] = div.getElementsByClassName(className);
+        e.replaceWith(...v.map((x) => x.el));
+      });
+      html += `<span class="${className}"></span>`;
+    }
+    html += strings[i + 1];
+  });
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  replacements.forEach((fn) => fn(div));
+
+  const handle = {
+    // like kotlin let
+    let: (fn) => {
+      fn(handle.el);
+      return handle;
+    },
+    attach: (target) => {
+      target.appendChild(handle.el);
+    },
+    el: div.firstElementChild ?? div.firstChild,
+  };
+
+  return handle;
+}
+
+function attr(fn) {
+  return {
+    fn,
+    [Symbol.for('isattr')]: true,
+  };
+}
+
+function events(listeners) {
+  return attr((el) => {
+    for (const [type, listener] of Object.entries(listeners)) {
+      el.addEventListener(type, listener);
+    }
+  });
+}
+
+export { h, attr, events };
