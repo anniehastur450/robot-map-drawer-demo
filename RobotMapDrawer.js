@@ -449,7 +449,7 @@ class MarkerList {
     this.nextId = 0;
     this.markers = new Map();
     this.cached = {
-      prevMarkers: new Map(),
+      markerDoms: new Map(),
     };
   }
   getListView(options) {
@@ -482,7 +482,7 @@ class MarkerList {
     };
   }
   previousMarkerDifferences() {
-    const prev = new Set(this.cached.prevMarkers.keys());
+    const prev = new Set(this.cached.markerDoms.keys());
     const curr = new Set(this.markers.keys());
     const removed = new Set(); // in prev, not in curr
     for (const id of prev) {
@@ -545,13 +545,13 @@ class MarkerList {
       h`
         <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
       `
-        .let((el) => this.cached.prevMarkers.set(id, { el }))
+        .let((el) => this.cached.markerDoms.set(id, { el }))
         .attach(root);
     }
     for (const id of removed) {
       console.log('removed', id);
-      root.removeChild(this.cached.prevMarkers.get(id).el);
-      this.cached.prevMarkers.delete(id);
+      root.removeChild(this.cached.markerDoms.get(id).el);
+      this.cached.markerDoms.delete(id);
     }
   }
   updateMarkerCamera() {
@@ -564,7 +564,7 @@ class MarkerList {
 
     // update all markers
     const [mapW, mapH] = this.drawer.config.mapSize;
-    for (const [id, { el }] of this.cached.prevMarkers) {
+    for (const [id, { el }] of this.cached.markerDoms) {
       const { name, x, y, color } = this.markers.get(id);
       // update x y op
       el.textContent = name;
@@ -575,7 +575,62 @@ class MarkerList {
     }
 
     // update all covers
-    
+    const remainingCovers = new Set(covers);
+    const { prevToCurrMap } = transform;
+    const updateCover = (circle, el) => {
+      const [x, y, r] = circle;
+      const baseD = 32; // 32px
+      const cs = (r * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
+      el.style.setProperty('--cs', `${cs}`);
+      el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+      el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+    };
+    const willRemove = (el) => {
+      el.style.setProperty('--op', `${0}`);
+      // this cover will disappear
+      const timer = setTimeout(() => {
+        // fallback remove action
+        console.warn('transitionend is not triggered');
+        el.remove();
+      }, 5000);
+      el.addEventListener('transitionend', (e) => {
+        if (e.propertyName === 'opacity') {
+          el.remove();
+          clearTimeout(timer);
+        }
+      });
+    };
+    this.cached.prevCovers?.forEach((prev) => {
+      const el = prev.el;
+      if (prevToCurrMap.has(prev)) {
+        const currCovers = [...prevToCurrMap.get(prev)];
+        if (currCovers.length == 1) {
+          // do not add or remove
+          const [curr] = currCovers;
+          curr.el = el;
+          updateCover(curr.circle, el);
+          remainingCovers.delete(curr);
+        } else {
+          willRemove(el);
+        }
+        // console.log('aa', prevToCurrMap.get(prev).size);
+      } else {
+        willRemove(el);
+      }
+    });
+    const root2 = this.doms.covers;
+    for (const curr of remainingCovers) {
+      h`
+        <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700"
+        ${attr((el) => (curr.el = el))} ></div>
+      `.attach(root2);
+      const el = curr.el;
+      el.style.setProperty('--op', `${1}`);
+      el.textContent = `${curr.ids.size}`;
+      updateCover(curr.circle, el);
+    }
+
+    this.cached.prevCovers = covers;
   }
   ____updateMarkerCamera() {
     this.compareCached();
