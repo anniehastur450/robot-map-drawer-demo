@@ -23,6 +23,7 @@ const fallbackConfig = {
 
   /* merging related */
   mergingPx: 50,
+  coverMethod: 'simple', // simple, smallest, mean or median
 };
 
 /* calculate cursor velocity in last [ms] ms */
@@ -447,7 +448,9 @@ class MarkerList {
     this.doms = {};
     this.nextId = 0;
     this.markers = new Map();
-    this.previousDraw = {};
+    this.cached = {
+      prevMarkers: new Map(),
+    };
   }
   getListView(options) {
     return new MarkerListView(this, options);
@@ -462,43 +465,123 @@ class MarkerList {
       </div>
     `.let((el) => (this.doms.el = el));
   }
-  comparePreviousDraw() {
-    const cached = new Set(this.previousDraw.cachedMarkers ?? []);
-    const added = new Set();
-    const removed = new Set();
+  solveMerging() {
+    const markers = [...this.markers.values()];
+    const points = markers.map(({ x, y }) => [x, y]);
+    const merging =
+      this.drawer.config.mergingPx / this.drawer.zoomedRatioScreenPx;
+    const solved = mergeSolver(points, merging, {
+      coverMethod: this.drawer.config.coverMethod,
+    });
+    return {
+      remains: new Set(solved.remains.map((i) => markers[i].id)),
+      covers: solved.covers.map(({ indexes, circle }) => ({
+        ids: new Set(indexes.map((i) => markers[i].id)),
+        circle,
+      })),
+    };
   }
-  updateMarkerCamera() {
-    // compare previous draw
-
-    const root = this.doms.markers;
-    const rect = root.getBoundingClientRect();
-    if (root.children.length != this.markers.length) {
-      for (const ch of root.children) {
-        root.removeChild(ch);
-      }
-      for (const [id, marker] of this.markers) {
-        h`
-          <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform bg-amber/50"></div>
-        `
-          .let((el) => (marker.el = el))
-          .attach(root);
+  previousMarkerDifferences() {
+    const prev = new Set(this.cached.prevMarkers.keys());
+    const curr = new Set(this.markers.keys());
+    const removed = new Set(); // in prev, not in curr
+    for (const id of prev) {
+      if (curr.has(id)) {
+        curr.delete(id);
+      } else {
+        removed.add(id);
       }
     }
+    return {
+      added: curr, // remaining of (curr - prev)
+      removed,
+    };
+  }
+  comparePreviousCovers(prevCovers, covers) {
+    // both is Set
+    // for current covers, try to find its previous state
+    function getBelongTo(covers) {
+      const belongTo = new Map();
+      for (const c of covers) {
+        for (const id of c.ids) {
+          belongTo.set(id, c);
+        }
+      }
+      return belongTo;
+    }
+    const belongTo = getBelongTo(covers);
+    // transform prev => curr
+    const prevToCurrMap = new Map(); // key is prev, value is set of curr
+    const currFromPrevMap = new Map(); // key is curr, value is set of prev
+    function put(map, k, v) {
+      if (!map.has(k)) {
+        map.set(k, new Set());
+      }
+      map.get(k).add(v);
+    }
+    function setTransform(prev, curr) {
+      if (!prev || !curr) {
+        return;
+      }
+      put(prevToCurrMap, prev, curr);
+      put(currFromPrevMap, curr, prev);
+    }
+    for (const prev of prevCovers) {
+      for (const id of prev.ids) {
+        const curr = belongTo.get(id);
+        setTransform(prev, curr);
+      }
+    }
+    return {
+      prevToCurrMap,
+      currFromPrevMap,
+    };
+  }
+  updateMarkerDomTree() {
+    const { added, removed } = this.previousMarkerDifferences();
+    const root = this.doms.markers;
+    for (const id of added) {
+      console.log('added', id);
+      h`
+        <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
+      `
+        .let((el) => this.cached.prevMarkers.set(id, { el }))
+        .attach(root);
+    }
+    for (const id of removed) {
+      console.log('removed', id);
+      root.removeChild(this.cached.prevMarkers.get(id).el);
+      this.cached.prevMarkers.delete(id);
+    }
+  }
+  updateMarkerCamera() {
+    this.updateMarkerDomTree();
+    const { remains, covers } = this.solveMerging();
+    const transform = this.comparePreviousCovers(
+      new Set(this.cached.prevCovers ?? []),
+      new Set(covers)
+    );
+
+    // update all markers
     const [mapW, mapH] = this.drawer.config.mapSize;
-    for (const [id, marker] of this.markers) {
-      const { name, x, y, el } = marker;
+    for (const [id, { el }] of this.cached.prevMarkers) {
+      const { name, x, y, color } = this.markers.get(id);
+      // update x y op
       el.textContent = name;
-      // el.getAnimations().forEach((x) => x.finish());
       // why use % instead of px? answer: avoid transition animation when changing aspect
       el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
       el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+      el.style.setProperty('--op', `${remains.has(id) ? 1 : 0}`);
     }
-    const zoomed = this.drawer.zoomedRatioScreenPx;
-    if (!zoomed) {
-      // TOFIX: this is caused by addMarker before value init
-      console.warn('zoomedRatioScreenPx not initialized');
-      return;
-    }
+
+    // update all covers
+    
+  }
+  ____updateMarkerCamera() {
+    this.compareCached();
+    // compare previous draw
+
+    const [mapW, mapH] = this.drawer.config.mapSize;
     const points = [...this.markers.values()].map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx / zoomed;
     const res = mergeSolver(points, merging, Infinity);

@@ -1,6 +1,20 @@
-import wetzls from './wetzls.js';
-
 // merge solver
+
+const coverMethods = {
+  simple: 'simpleUpdateCircle',
+  /* smallest: 'wetzlsUpdateCircle', */
+  mean: 'meanUpdateCircle',
+  median: 'medianUpdateCircle',
+};
+
+let wetzls;
+(async () => {
+  try {
+    // optional ./wetzls.js
+    wetzls = (await import('./wetzls.js')).default;
+    coverMethods['smallest'] = 'wetzlsUpdateCircle';
+  } catch (e) {}
+})();
 
 function* entryPairs(array) {
   for (let i = 0; i < array.length; i++) {
@@ -8,6 +22,15 @@ function* entryPairs(array) {
       yield [i, j, array[i], array[j]];
     }
   }
+}
+
+function median(numbers) {
+  const sorted = [...numbers].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) {
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+  return sorted[middle];
 }
 
 class Cover {
@@ -24,6 +47,13 @@ class Cover {
     const { x, y, r } = wetzls(mapped);
     this.circle = [x, y, r];
   }
+  simpleCircle(x, y, points) {
+    const rs = this.indexes.map((i) => {
+      const [x2, y2] = points[i];
+      return Math.hypot(x2 - x, y2 - y);
+    });
+    return [x, y, Math.max(...rs)];
+  }
   simpleUpdateCircle(points) {
     const xs = this.indexes.map((i) => points[i][0]);
     const ys = this.indexes.map((i) => points[i][1]);
@@ -31,27 +61,45 @@ class Cover {
     const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
     const x = (x0 + x1) / 2;
     const y = (y0 + y1) / 2;
-    const rs = this.indexes.map((i) => {
-      const [x2, y2] = points[i];
-      return Math.hypot(x2 - x, y2 - y);
-    });
     // this is not the smallest circle, but good enough
     // for improve, see smallest circle problem and Welzl's algorithm
-    this.circle = [x, y, Math.max(...rs)];
+    this.circle = this.simpleCircle(x, y, points);
+  }
+  meanUpdateCircle(points) {
+    const xs = this.indexes.map((i) => points[i][0]);
+    const ys = this.indexes.map((i) => points[i][1]);
+    const sx = xs.reduce((p, v) => p + v);
+    const sy = ys.reduce((p, v) => p + v);
+    const x = sx / xs.length;
+    const y = sy / ys.length;
+    this.circle = this.simpleCircle(x, y, points);
+  }
+  medianUpdateCircle(points) {
+    const xs = this.indexes.map((i) => points[i][0]).sort((a, b) => a - b);
+    const ys = this.indexes.map((i) => points[i][1]).sort((a, b) => a - b);
+    const x = median(xs);
+    const y = median(ys);
+    this.circle = this.simpleCircle(x, y, points);
   }
 }
 
+const fallbackExtraOptions = {
+  maximumCoverDiameter: Infinity,
+  coverMethod: 'simple',
+};
+
+function invalidArgument(x) {
+  throw new Error(`invalid argument: ${x}`);
+}
+
 // [x, y]..., merging px -> circles [x, y, r]...
-function mergeSolver(
-  points,
-  mergingDistance,
-  maximumCoverDiameter = Infinity,
-  coverAlgorithm = 'simple'
-) {
+function mergeSolver(points, mergingDistance, extraOptions) {
   // first, create a list of [pt1, pt2] that they should merge
   // second, create a circle for each [pt1, pt2]
   // final, merge overlapping circles into a bigger circle
   // after final, check if exceed maximum, break them down if necessary
+  const { maximumCoverDiameter, coverMethod } = /*
+   */ { ...fallbackExtraOptions, ...extraOptions };
   if (maximumCoverDiameter < mergingDistance) {
     console.warn(
       `maximumCoverDiameter < mergingDistance: ${maximumCoverDiameter} < ${mergingDistance}`
@@ -59,10 +107,8 @@ function mergeSolver(
     maximumCoverDiameter = mergingDistance;
   }
 
-  const updateCircleMethod = {
-    simple: 'simpleUpdateCircle',
-    wetzls: 'wetzlsUpdateCircle',
-  }[coverAlgorithm];
+  const updateCircleMethod =
+    coverMethods[coverMethod] ?? invalidArgument(coverMethod);
 
   const pairs = [];
   for (const [i, j, [x1, y1], [x2, y2]] of entryPairs(points)) {

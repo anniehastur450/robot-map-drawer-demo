@@ -51,3 +51,4 @@ const robotMapDrawer = new RobotMapDrawer();
 
 - markers merge into a circle when close
 - indicator for markers out of view
+- circle merging animation
