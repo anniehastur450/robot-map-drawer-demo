@@ -477,8 +477,9 @@ class MarkerList {
     const points = markers.map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx / zoomed;
     const solved = mergeSolver(points, merging, {
-      minimumCoverDiameter: merging,
-      coverExtraRadius: this.drawer.config.markerSizePx / zoomed,
+      // TODO: these options need more experiments for the look and feel
+      minimumCoverDiameter: merging * 2,
+      // coverExtraRadius: this.drawer.config.markerSizePx / zoomed,
       coverMethod: this.drawer.config.coverMethod,
     });
     return {
