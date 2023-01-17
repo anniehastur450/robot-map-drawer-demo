@@ -323,7 +323,7 @@ class RobotMapDrawer {
             // otherwise no mouse event when cursor outside iframe
             let [prevX, prevY] = [e.clientX, e.clientY];
             const trails = [[prevX, prevY, performance.now()]];
-            e.target.style.cursor = 'move';
+            e.target.classList.add('cursor-move');
             const mousemove = (e) => {
               const [x, y] = [e.clientX, e.clientY];
               this.camera.offset[0] += (x - prevX) / this.zoomedRatioScreenPx;
@@ -339,7 +339,7 @@ class RobotMapDrawer {
               if (velocity > 0) {
                 this.startInertiaDragging(velocityX, velocityY);
               }
-              e.target.style.cursor = '';
+              e.target.classList.remove('cursor-move');
               window.removeEventListener('mousemove', mousemove);
               window.removeEventListener('mouseup', mouseup);
             };
@@ -360,22 +360,13 @@ class RobotMapDrawer {
             }
           },
           mousemove: (e) => {
-            // TODO: use this
-            const rect = e.target.getBoundingClientRect();
-            const [x, y] = [e.clientX - rect.left, e.clientY - rect.top];
-            const cx = x - rect.width / 2;
-            const cy = y - rect.height / 2;
-            let [mapX, mapY] = this.camera.offset;
-            [mapX, mapY] = [-mapX, -mapY];
-            mapX += cx / this.zoomedRatioScreenPx;
-            mapY += cy / this.zoomedRatioScreenPx;
-            // console.log(mapX, mapY);
+            this.hoverPopup.registerGlobalMousemoveEvent(e);
           },
         })} >
         </div>
 
         <!-- camera and view -->
-        <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden"
+        <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden select-none"
         ${attr((el) => el.style.setProperty('--bg', this.config.bgColor))} >
           <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative">
             <div class="absolute w-full h-full transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
@@ -391,7 +382,7 @@ class RobotMapDrawer {
         </div>
 
         <!-- scale bar -->
-        <div class="absolute bg-white/50 px-1 bottom-2 right-2 z-50 pointer-events-none">
+        <div class="absolute bg-white/50 px-1 bottom-2 right-2 z-50 pointer-events-none select-none">
           <div class="flex items-center">
             <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black b-t-none"
             ${attr((el) => (this.doms.scaleBar = el))} ></div>
@@ -399,6 +390,9 @@ class RobotMapDrawer {
             ${attr((el) => (this.doms.scaleText = el))} >1km</div>
           </div>
         </div>
+
+        <!-- hover popup -->
+        ${this.hoverPopup.getEl()}
 
       </div>
     `
@@ -411,6 +405,63 @@ class RobotMapDrawer {
   //////////////////////////////////////////////////////
 
   markerList = new MarkerList(this);
+  hoverPopup = new HoverPopup(this);
+}
+
+//////////////////////// HOVER POPUP ////////////////////////
+
+class HoverPopup {
+  /*
+    notes: some detail of google map hover logic:
+      * info panel have a delay before show when cursor hover
+      * then hovering others the delay is removed
+      * unless panning or zooming, the delay will come back
+   */
+  constructor(drawer) {
+    this.drawer = drawer;
+    this.doms = {};
+    this.mousemove = null;
+  }
+  getEl() {
+    if (this.doms.el) {
+      throw new Error('assert false');
+    }
+    return h`
+      <div class="absolute left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50">
+        <div class="w-100px h-30px bg-white shadow rounded">
+          Info
+        </div>
+      </div>
+    `.let((el) => (this.doms.el = el));
+  }
+  registerGlobalMousemoveEvent(e) {
+    if (this.mousemove) {
+      return;
+    }
+    const dragEl = e.target;
+    const root = this.doms.el;
+    const mousemove = (e) => {
+      const elData = this.drawer.markerList.elData;
+      const [x, y] = [e.clientX, e.clientY];
+      const hovers = [...document.elementsFromPoint(x, y)] //
+        .filter((x) => elData.has(x) && !elData.get(x).hidden);
+      if (hovers.length !== 0) {
+        dragEl.classList.add('!cursor-pointer');
+        const [el] = hovers;
+        const r0 = dragEl.getBoundingClientRect();
+        const r1 = el.getBoundingClientRect();
+        const x = r1.left - r0.left;
+        const y = r1.top - r0.top;
+        root.style.setProperty('--x', `${x}px`);
+        root.style.setProperty('--y', `${y + r1.height}px`);
+        console.log(hovers);
+      } else {
+        dragEl.classList.remove('!cursor-pointer');
+      }
+    };
+    this.mousemove = mousemove;
+    window.addEventListener('mousemove', mousemove);
+  }
 }
 
 //////////////////////// MARKER LIST ////////////////////////
@@ -454,6 +505,7 @@ class MarkerList {
     this.cached = {
       markerExtra: new Map(),
     };
+    this.elData = new WeakMap(); // this is for elementsFromPoint to look up only
   }
   getListView(options) {
     return new MarkerListView(this, options);
@@ -508,8 +560,9 @@ class MarkerList {
   }
   getMarkerDom(root) {
     const el = h`
-      <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)] bg-amber/50"></div>
+      <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
     `.el;
+    this.elData.set(el, { type: 'marker' });
     const handle = {
       el,
       update: (marker, opacity) => {
@@ -520,14 +573,18 @@ class MarkerList {
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         el.style.setProperty('--op', `${opacity}`);
+        this.elData.get(el).id = marker.id;
+        this.elData.get(el).hidden = opacity == 0;
         return handle;
       },
       attach: () => {
         root.appendChild(el);
+        this.elData.get(el).active = true;
         return handle;
       },
       detach: () => {
         el.remove();
+        this.elData.get(el).active = false;
         return handle;
       },
     };
@@ -537,6 +594,7 @@ class MarkerList {
     const el = h`
       <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700" ></div>
     `.el;
+    this.elData.set(el, { type: 'cover' });
     const handle = {
       el,
       update: (cover) => {
@@ -548,6 +606,7 @@ class MarkerList {
         el.style.setProperty('--cs', `${cs}`);
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+        this.elData.get(el).cover = cover;
         return handle;
       },
       /* attach with fade in */
@@ -560,6 +619,7 @@ class MarkerList {
           observer.disconnect();
         });
         observer.observe(el);
+        this.elData.get(el).active = true;
         return handle;
       },
       /* detach with fade out */
@@ -576,6 +636,7 @@ class MarkerList {
             clearTimeout(timer);
           }
         });
+        this.elData.get(el).active = false;
         return handle;
       },
     };
