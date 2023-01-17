@@ -544,7 +544,7 @@ class MarkerList {
     for (const id of added) {
       console.log('added', id);
       h`
-        <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
+        <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)] bg-amber/50"></div>
       `
         .let((el) => this.cached.markerDoms.set(id, { el }))
         .attach(root);
@@ -580,6 +580,7 @@ class MarkerList {
     const { prevToCurrMap, currFromPrevMap } = transform;
     const updateCover = (circle, el) => {
       const [x, y, r] = circle;
+      // note: minimum display merging here
       const dr = Math.max(r, merging);
       const baseD = 32; // 32px
       const cs = (dr * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
@@ -602,7 +603,6 @@ class MarkerList {
         }
       });
     };
-    console.log(this.cached.prevCovers, this.doms.covers.childElementCount);
     this.cached.prevCovers?.forEach((prev) => {
       const el = prev.el;
       if (prevToCurrMap.has(prev)) {
@@ -620,7 +620,6 @@ class MarkerList {
         } else {
           willRemove(el);
         }
-        // console.log('aa', prevToCurrMap.get(prev).size);
       } else {
         willRemove(el);
       }
@@ -628,51 +627,17 @@ class MarkerList {
     const root2 = this.doms.covers;
     for (const curr of remainingCovers) {
       h`
-        <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700"
+        <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)]! rounded-full bg-blue/50 flex justify-center items-center text-slate-700"
         ${attr((el) => (curr.el = el))} ></div>
       `.attach(root2);
       const el = curr.el;
-      el.style.setProperty('--op', `${1}`);
+      el.style.setProperty('--op', `${0}`);
+      setTimeout(() => el.style.setProperty('--op', `${1}`));
       el.textContent = `${curr.ids.size}`;
       updateCover(curr.circle, el);
     }
 
     this.cached.prevCovers = covers;
-  }
-  ____updateMarkerCamera() {
-    this.compareCached();
-    // compare previous draw
-
-    const [mapW, mapH] = this.drawer.config.mapSize;
-    const points = [...this.markers.values()].map(({ x, y }) => [x, y]);
-    const merging = this.drawer.config.mergingPx / zoomed;
-    const res = mergeSolver(points, merging, Infinity);
-    console.log(res);
-    const root2 = this.doms.covers;
-    root2.innerHTML = '';
-    const minR = this.drawer.config.mergingPx;
-    for (const cover of res.covers) {
-      const [x, y, r] = cover.circle;
-      h`
-        <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition- rounded-full bg-black/50"
-        ${attr((el) => {
-          el.style.setProperty(
-            '--d',
-            `${Math.max(r * 2 * zoomed, this.drawer.config.mergingPx)}px`
-          );
-          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
-          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-        })} ></div>
-      `.attach(root2);
-      h`
-        <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition-transform,width,height rounded-full bg-blue/50"
-        ${attr((el) => {
-          el.style.setProperty('--d', `${r * 2 * zoomed}px`);
-          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
-          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-        })} ></div>
-      `.attach(root2);
-    }
   }
   setPendingUpdate() {
     // call updateCamera once for multiple addMarker in sync calls
