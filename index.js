@@ -37,8 +37,8 @@ const robots = [
   ['🐕 2', /*       */ 15.4, -16, '#F2CEA2'],
 ];
 
-for (const [id, x, y, color] of robots) {
-  markers.add(id, { x, y, color });
+for (const [name, x, y, color] of robots) {
+  markers.add(null, { name, x, y, color }); // null means id is auto generated
 }
 
 // Write Javascript code!

@@ -27,7 +27,7 @@ Copy the following two files:
 - `RobotMapDrawer.js`
 - `dom-helper.js`
 
-The main file of this library is RobotMapDrawer.js, which contains the RobotMapDrawer class. To use the library, import the class and create a new instance:
+The main file of this library is `RobotMapDrawer.js`, which contains the `RobotMapDrawer` class. To use the library, import the class and create a new instance:
 
 ```javascript
 import { RobotMapDrawer } from 'robot-map-drawer';

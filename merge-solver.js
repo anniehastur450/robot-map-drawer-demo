@@ -101,6 +101,7 @@ function mergeSolver(
         c1[updateCircleMethod](points);
         covers.splice(j, 1);
         dirty = true;
+        console.log('dirty found');
         break;
       }
     }

@@ -19,6 +19,9 @@ const fallbackConfig = {
      */ 125, 150, 175, 200, 250, 300, 400, 500, /*
      */ 750, 1000, 1500, 2000,
   ],
+  /* inertia dragging related */
+
+  /* merging related */
   mergingPx: 50,
 };
 
@@ -140,8 +143,8 @@ class RobotMapDrawer {
       const [w, h] = [rect.width, rect.height];
       const aspectW = Math.min(w, (h / mapH) * mapW);
       const aspectH = (aspectW / mapW) * mapH;
-      el.style.setProperty('--w', `${w}px`);
-      el.style.setProperty('--h', `${h}px`);
+      el.style.setProperty('--ref-w', `${w}px`);
+      el.style.setProperty('--ref-h', `${h}px`);
       el.style.setProperty('--aspect-w', `${aspectW}px`);
       el.style.setProperty('--aspect-h', `${aspectH}px`);
       this.ratios.screenPxByMapUnit = aspectW / mapW;
@@ -150,6 +153,9 @@ class RobotMapDrawer {
     resizeObserver.observe(el);
   }
   updateCamera() {
+    if (!this.ratios.screenPxByMapUnit /* 0 is also invalid */) {
+      return;
+    }
     const el = this.doms.camera;
     const [mapW, mapH] = this.config.mapSize;
     const [x, y] = this.camera.offset;
@@ -231,7 +237,7 @@ class RobotMapDrawer {
   }
   attach(target) {
     h`
-      <div class="w-full h-full shadow-lg shadow-inset b b-solid b-gray-200 relative font-sans">
+      <div class="w-full h-full b b-solid b-gray-200 relative font-sans">
 
         <!-- zoom buttons -->
         <div class="absolute top-1 left-1 text-gray">
@@ -249,7 +255,7 @@ class RobotMapDrawer {
             })} >
               100%
             </button>
-            <input class="w-[var(--zoom-w)] btn h-6 bg-white text-gray-500 absolute right-0 text-center" value="100%"
+            <input value="100%" class="w-[var(--zoom-w)] btn h-6 bg-white text-gray-500 absolute right-0 text-center"
             ${attr((el) => {
               this.doms.zoomInput = el;
               const observer = new MutationObserver(() => {
@@ -368,7 +374,7 @@ class RobotMapDrawer {
         <!-- camera and view -->
         <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden"
         ${attr((el) => el.style.setProperty('--bg', this.config.bgColor))} >
-          <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] flex justify-center items-center">
+          <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative">
             <div class="absolute w-full h-full transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
             ${attr((el) => (this.doms.camera = el))} >
               <img width="0" height="0" class="absolute w-full h-full"
@@ -439,14 +445,16 @@ class MarkerList {
     this.drawer = drawer;
     this.pending = null;
     this.doms = {};
-    this.markers = [];
+    this.nextId = 0;
+    this.markers = new Map();
+    this.previousDraw = {};
   }
   getListView(options) {
     return new MarkerListView(this, options);
   }
   getEl() {
     return h`
-      <div class="absolute w-full h-full bg-amber/50">
+      <div class="absolute w-full h-full">
         <div class="absolute w-full h-full"
         ${attr((el) => (this.doms.markers = el))} ></div>
         <div class="absolute w-full h-full"
@@ -454,22 +462,21 @@ class MarkerList {
       </div>
     `.let((el) => (this.doms.el = el));
   }
-  // getEl() {
-  //   return h`
-  //     <div class="absolute w-full h-full flex justify-center items-center overflow-hidden">
-  //       <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative"
-  //       ${attr((el) => (this.doms.container = el))} ></div>
-  //     </div>
-  //   `.let((el) => (this.doms.el = el));
-  // }
+  comparePreviousDraw() {
+    const cached = new Set(this.previousDraw.cachedMarkers ?? []);
+    const added = new Set();
+    const removed = new Set();
+  }
   updateMarkerCamera() {
+    // compare previous draw
+
     const root = this.doms.markers;
     const rect = root.getBoundingClientRect();
     if (root.children.length != this.markers.length) {
       for (const ch of root.children) {
         root.removeChild(ch);
       }
-      for (const marker of this.markers) {
+      for (const [id, marker] of this.markers) {
         h`
           <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform bg-amber/50"></div>
         `
@@ -478,9 +485,9 @@ class MarkerList {
       }
     }
     const [mapW, mapH] = this.drawer.config.mapSize;
-    for (const marker of this.markers) {
-      const { id, x, y, el } = marker;
-      el.textContent = id;
+    for (const [id, marker] of this.markers) {
+      const { name, x, y, el } = marker;
+      el.textContent = name;
       // el.getAnimations().forEach((x) => x.finish());
       // why use % instead of px? answer: avoid transition animation when changing aspect
       el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
@@ -492,7 +499,7 @@ class MarkerList {
       console.warn('zoomedRatioScreenPx not initialized');
       return;
     }
-    const points = this.markers.map(({ x, y }) => [x, y]);
+    const points = [...this.markers.values()].map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx / zoomed;
     const res = mergeSolver(points, merging, Infinity);
     console.log(res);
@@ -503,20 +510,23 @@ class MarkerList {
       const [x, y, r] = cover.circle;
       h`
         <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition- rounded-full bg-black/50"
-        ${attr(el => {
-          el.style.setProperty('--d', `${Math.max(r * 2 * zoomed, this.drawer.config.mergingPx)}px`)
-          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`)
-          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`)
+        ${attr((el) => {
+          el.style.setProperty(
+            '--d',
+            `${Math.max(r * 2 * zoomed, this.drawer.config.mergingPx)}px`
+          );
+          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         })} ></div>
-      `.attach(root2)
+      `.attach(root2);
       h`
         <div class="absolute -translate-1/2 w-[var(--d)] scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] h-[var(--d)] transition-transform,width,height rounded-full bg-blue/50"
-        ${attr(el => {
-          el.style.setProperty('--d', `${r * 2 * zoomed}px`)
-          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`)
-          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`)
+        ${attr((el) => {
+          el.style.setProperty('--d', `${r * 2 * zoomed}px`);
+          el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+          el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         })} ></div>
-      `.attach(root2)
+      `.attach(root2);
     }
   }
   setPendingUpdate() {
@@ -528,8 +538,12 @@ class MarkerList {
       });
     }
   }
-  addMarker(marker) {
-    this.markers.push(marker);
+  addMarker(id, marker) {
+    if (id == null) {
+      id = this.nextId;
+      this.nextId++;
+    }
+    this.markers.set(id, { ...marker, id });
     this.setPendingUpdate();
   }
 }
@@ -576,30 +590,30 @@ class MarkerListView {
       }[this.options['+y']] ?? invalidArgument(this.options['+x']);
   }
   toUserLocation(internalLocation) {
-    // A = loc, C = center, O = origin (in internal axis)
-    // want: OA, known: CA, CO
+    // A = loc, C = map center, O = user origin (in internal axis)
+    // want: OA (user), known: CA (internal), CO (origin)
     // OA = OC + CA = -(CO) + CA
     // to convert to user loc, just times '+x' and '+y'
-    const [caX, caY] = internalLocation;
-    const [coX, coY] = this.options.origin;
-    let [oaX, oaY] = [caX - coX, caY - coY];
-    oaX *= this.X;
-    oaY *= this.Y;
-    return [oaX, oaY];
+    const [CA_x, CA_y] = internalLocation;
+    const [CO_x, CO_y] = this.options.origin;
+    let [OA_x, OA_y] = [CA_x - CO_x, CA_y - CO_y];
+    OA_x *= this.X;
+    OA_y *= this.Y;
+    return [OA_x, OA_y];
   }
   toInternalLocation(userLocation) {
     // OA = CA - CO, CA = OA + CO
-    let [oaX, oaY] = userLocation;
-    oaX *= this.X;
-    oaY *= this.Y;
-    const [coX, coY] = this.options.origin;
-    const [caX, caY] = [oaX + coX, oaY + coY];
-    return [caX, caY];
+    let [OA_x, OA_y] = userLocation;
+    OA_x *= this.X;
+    OA_y *= this.Y;
+    const [CO_x, CO_y] = this.options.origin;
+    const [CA_x, CA_y] = [OA_x + CO_x, OA_y + CO_y];
+    return [CA_x, CA_y];
   }
-  add(id, { x, y, color }) {
+  add(id, { name, x, y, color }) {
     const [x2, y2] = this.toInternalLocation([x, y]);
-    this.mainList.addMarker({
-      id,
+    this.mainList.addMarker(id, {
+      name,
       x: x2,
       y: y2,
       color,
