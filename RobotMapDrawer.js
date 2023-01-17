@@ -23,7 +23,8 @@ const fallbackConfig = {
 
   /* merging related */
   mergingPx: 32,
-  coverMethod: 'simple', // simple, smallest, mean or median
+  markerSizePx: 16, // size for merge cover to cover
+  coverMethod: 'simple', // 'simple', 'smallest', 'mean' or 'median'
 };
 
 /* calculate cursor velocity in last [ms] ms */
@@ -63,24 +64,25 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function comparePrevious(previous, next) {
-  const changes = {};
-  for (const [k, v] of Object.entries(next)) {
-    changes[k] = this.previous[k] !== v;
-  }
-  changes.any = (...keys) => {
-    if (keys.length === 0) keys = next.keys();
-    return keys.some((k) => changes[k]);
-  };
-  return {
-    changes,
-    updatePrevious: () => {
-      for (const [k, v] of Object.entries(next)) {
-        this.previous[k] = v;
-      }
-    },
-  };
-}
+// TODO use it
+// function comparePrevious(previous, next) {
+//   const changes = {};
+//   for (const [k, v] of Object.entries(next)) {
+//     changes[k] = this.previous[k] !== v;
+//   }
+//   changes.any = (...keys) => {
+//     if (keys.length === 0) keys = next.keys();
+//     return keys.some((k) => changes[k]);
+//   };
+//   return {
+//     changes,
+//     updatePrevious: () => {
+//       for (const [k, v] of Object.entries(next)) {
+//         this.previous[k] = v;
+//       }
+//     },
+//   };
+// }
 
 class RobotMapDrawer {
   constructor(config) {
@@ -431,6 +433,7 @@ const fallbackListViewOptions = {
   '+y': 'top', // top or bottom. for math axis, it is top, for computer screen axis, it is bottom
 };
 
+// TODO use it
 // class Emitter {
 //   // https://stackoverflow.com/questions/22186467/how-to-use-javascript-eventtarget
 //   constructor() {
@@ -449,13 +452,16 @@ class MarkerList {
     this.nextId = 0;
     this.markers = new Map();
     this.cached = {
-      markerDoms: new Map(),
+      markerExtra: new Map(),
     };
   }
   getListView(options) {
     return new MarkerListView(this, options);
   }
   getEl() {
+    if (this.doms.el) {
+      throw new Error('assert false');
+    }
     return h`
       <div class="absolute w-full h-full">
         <div class="absolute w-full h-full"
@@ -466,20 +472,21 @@ class MarkerList {
     `.let((el) => (this.doms.el = el));
   }
   solveMerging() {
+    const zoomed = this.drawer.zoomedRatioScreenPx;
     const markers = [...this.markers.values()];
     const points = markers.map(({ x, y }) => [x, y]);
-    const merging =
-      this.drawer.config.mergingPx / this.drawer.zoomedRatioScreenPx;
+    const merging = this.drawer.config.mergingPx / zoomed;
     const solved = mergeSolver(points, merging, {
+      minimumCoverDiameter: merging,
+      coverExtraRadius: this.drawer.config.markerSizePx / zoomed,
       coverMethod: this.drawer.config.coverMethod,
     });
     return {
-      remains: new Set(solved.remains.map((i) => markers[i].id)),
+      remains: solved.remains.map((i) => markers[i].id),
       covers: solved.covers.map(({ indexes, circle }) => ({
-        ids: new Set(indexes.map((i) => markers[i].id)),
+        ids: indexes.map((i) => markers[i].id),
         circle,
       })),
-      merging,
     };
   }
   previousMarkerDifferences() {
@@ -498,146 +505,146 @@ class MarkerList {
       removed,
     };
   }
-  comparePreviousCovers(prevCovers, covers) {
-    // both is Set
-    // for current covers, try to find its previous state
-    function getBelongTo(covers) {
-      const belongTo = new Map();
-      for (const c of covers) {
-        for (const id of c.ids) {
-          belongTo.set(id, c);
-        }
-      }
-      return belongTo;
-    }
-    const belongTo = getBelongTo(covers);
-    // transform prev => curr
-    const prevToCurrMap = new Map(); // key is prev, value is set of curr
-    const currFromPrevMap = new Map(); // key is curr, value is set of prev
-    function put(map, k, v) {
-      if (!map.has(k)) {
-        map.set(k, new Set());
-      }
-      map.get(k).add(v);
-    }
-    function setTransform(prev, curr) {
-      if (!prev || !curr) {
-        return;
-      }
-      put(prevToCurrMap, prev, curr);
-      put(currFromPrevMap, curr, prev);
-    }
-    for (const prev of prevCovers) {
-      for (const id of prev.ids) {
-        const curr = belongTo.get(id);
-        setTransform(prev, curr);
-      }
-    }
-    return {
-      prevToCurrMap,
-      currFromPrevMap,
+  getMarkerDom(root) {
+    const el = h`
+      <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)] bg-amber/50"></div>
+    `.el;
+    const handle = {
+      el,
+      update: (marker, opacity) => {
+        const [mapW, mapH] = this.drawer.config.mapSize;
+        const { name, x, y, color } = marker; // TODO color
+        el.textContent = name;
+        // why use % instead of px? answer: avoid transition animation when changing aspect
+        el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+        el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+        el.style.setProperty('--op', `${opacity}`);
+        return handle;
+      },
+      attach: () => {
+        root.appendChild(el);
+        return handle;
+      },
+      detach: () => {
+        el.remove();
+        return handle;
+      },
     };
+    return handle;
+  }
+  getCoverDom(root2) {
+    const el = h`
+      <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700" ></div>
+    `.el;
+    const handle = {
+      el,
+      update: (cover) => {
+        const [mapW, mapH] = this.drawer.config.mapSize;
+        const [x, y, r] = cover.circle;
+        el.textContent = `${cover.ids.length}`;
+        const baseD = 32; // 32px, same to the h above
+        const cs = (r * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
+        el.style.setProperty('--cs', `${cs}`);
+        el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
+        el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
+        return handle;
+      },
+      /* attach with fade in */
+      attach: () => {
+        el.style.setProperty('--op', `${0}`);
+        root2.appendChild(el);
+        // make sure transition is triggered
+        const observer = new ResizeObserver((entries) => {
+          el.style.setProperty('--op', `${1}`);
+          observer.disconnect();
+        });
+        observer.observe(el);
+        return handle;
+      },
+      /* detach with fade out */
+      detach: () => {
+        el.style.setProperty('--op', `${0}`);
+        const timer = setTimeout(() => {
+          // fallback remove action
+          console.warn('transitionend is not triggered');
+          el.remove();
+        }, 5000);
+        el.addEventListener('transitionend', (e) => {
+          if (e.propertyName === 'opacity') {
+            el.remove();
+            clearTimeout(timer);
+          }
+        });
+        return handle;
+      },
+    };
+    return handle;
   }
   updateMarkerDomTree() {
-    const { added, removed } = this.previousMarkerDifferences();
-    const root = this.doms.markers;
-    for (const id of added) {
-      console.log('added', id);
-      h`
-        <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)] bg-amber/50"></div>
-      `
-        .let((el) => this.cached.markerDoms.set(id, { el }))
-        .attach(root);
+    const curr = new Set(this.markers.keys());
+    for (const id of [...this.cached.markerExtra.keys()]) {
+      if (curr.has(id)) {
+        curr.delete(id); // exist in both prev and curr
+      } else {
+        // removed from curr
+        this.cached.markerExtra.get(id).detach();
+        this.cached.markerExtra.delete(id);
+      }
     }
-    for (const id of removed) {
-      console.log('removed', id);
-      root.removeChild(this.cached.markerDoms.get(id).el);
-      this.cached.markerDoms.delete(id);
+    for (const id of curr) {
+      // newly added to curr
+      const handle = this.getMarkerDom(this.doms.markers).attach();
+      this.cached.markerExtra.set(id, handle);
     }
+  }
+  findUnchangedCovers(prevCovers, covers) {
+    // unchange if both ids is equals ignore order
+    const res = [];
+    covers = new Set(covers);
+    for (const p of prevCovers ?? []) {
+      for (const c of covers) {
+        const equals =
+          p.ids.length === c.ids.length &&
+          new Set([...p.ids, ...c.ids]).size === p.ids.length;
+        if (equals) {
+          res.push([p, c]);
+          covers.delete(c);
+          break;
+        }
+      }
+    }
+    return res;
   }
   updateMarkerCamera() {
     this.updateMarkerDomTree();
-    const { remains, covers, merging } = this.solveMerging();
-    const transform = this.comparePreviousCovers(
-      new Set(this.cached.prevCovers ?? []),
-      new Set(covers)
-    );
+    const solved = this.solveMerging();
 
     // update all markers
-    const [mapW, mapH] = this.drawer.config.mapSize;
-    for (const [id, { el }] of this.cached.markerDoms) {
-      const { name, x, y, color } = this.markers.get(id);
-      // update x y op
-      el.textContent = name;
-      // why use % instead of px? answer: avoid transition animation when changing aspect
-      el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
-      el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-      el.style.setProperty('--op', `${remains.has(id) ? 1 : 0}`);
+    const remains = new Set(solved.remains);
+    for (const [id, handle] of this.cached.markerExtra) {
+      const opacity = remains.has(id) ? 1 : 0;
+      handle.update(this.markers.get(id), opacity);
     }
 
     // update all covers
-    const remainingCovers = new Set(covers);
-    const { prevToCurrMap, currFromPrevMap } = transform;
-    const updateCover = (circle, el) => {
-      const [x, y, r] = circle;
-      // note: minimum display merging here
-      const dr = Math.max(r, merging);
-      const baseD = 32; // 32px
-      const cs = (dr * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
-      el.style.setProperty('--cs', `${cs}`);
-      el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
-      el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-    };
-    const willRemove = (el) => {
-      el.style.setProperty('--op', `${0}`);
-      // this cover will disappear
-      const timer = setTimeout(() => {
-        // fallback remove action
-        console.warn('transitionend is not triggered');
-        el.remove();
-      }, 5000);
-      el.addEventListener('transitionend', (e) => {
-        if (e.propertyName === 'opacity') {
-          el.remove();
-          clearTimeout(timer);
-        }
-      });
-    };
-    this.cached.prevCovers?.forEach((prev) => {
-      const el = prev.el;
-      if (prevToCurrMap.has(prev)) {
-        const currCovers = [...prevToCurrMap.get(prev)];
-        if (
-          prevToCurrMap.get(prev).size == 1 &&
-          currFromPrevMap.get(currCovers[0]).size == 1 // terrible fix: TOFIX
-        ) {
-          // do not add or remove
-          const [curr] = [...prevToCurrMap.get(prev)];
-          curr.el = el;
-          updateCover(curr.circle, el);
-          el.textContent = `${curr.ids.size}`;
-          remainingCovers.delete(curr);
-        } else {
-          willRemove(el);
-        }
-      } else {
-        willRemove(el);
-      }
-    });
-    const root2 = this.doms.covers;
-    for (const curr of remainingCovers) {
-      h`
-        <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity,top,left opacity-[var(--op)]! rounded-full bg-blue/50 flex justify-center items-center text-slate-700"
-        ${attr((el) => (curr.el = el))} ></div>
-      `.attach(root2);
-      const el = curr.el;
-      el.style.setProperty('--op', `${0}`);
-      setTimeout(() => el.style.setProperty('--op', `${1}`));
-      el.textContent = `${curr.ids.size}`;
-      updateCover(curr.circle, el);
+    const unchanged = this.findUnchangedCovers(
+      this.cached.prevCovers,
+      solved.covers
+    );
+    const detaching = new Set(this.cached.prevCovers);
+    const attaching = new Set(solved.covers);
+    for (const [p, c] of unchanged) {
+      c.handle = p.handle.update(c);
+      detaching.delete(p);
+      attaching.delete(c);
     }
-
-    this.cached.prevCovers = covers;
+    for (const p of detaching) {
+      p.handle.detach();
+    }
+    for (const c of attaching) {
+      c.handle = this.getCoverDom(this.doms.covers).update(c).attach();
+    }
+    this.cached.prevCovers = solved.covers;
   }
   setPendingUpdate() {
     // call updateCamera once for multiple addMarker in sync calls

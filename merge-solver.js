@@ -11,11 +11,14 @@ let wetzls;
 (async () => {
   try {
     // optional ./wetzls.js
+    // d3 article: https://observablehq.com/@d3/d3-packenclose
+    // npm package: https://github.com/rowanwins/smallest-enclosing-circle
     wetzls = (await import('./wetzls.js')).default;
     coverMethods['smallest'] = 'wetzlsUpdateCircle';
   } catch (e) {}
 })();
 
+/* generator of combinations of n choose 2 */
 function* entryPairs(array) {
   for (let i = 0; i < array.length; i++) {
     for (let j = i + 1; j < array.length; j++) {
@@ -75,8 +78,8 @@ class Cover {
     this.circle = this.simpleCircle(x, y, points);
   }
   medianUpdateCircle(points) {
-    const xs = this.indexes.map((i) => points[i][0]).sort((a, b) => a - b);
-    const ys = this.indexes.map((i) => points[i][1]).sort((a, b) => a - b);
+    const xs = this.indexes.map((i) => points[i][0]);
+    const ys = this.indexes.map((i) => points[i][1]);
     const x = median(xs);
     const y = median(ys);
     this.circle = this.simpleCircle(x, y, points);
@@ -84,7 +87,10 @@ class Cover {
 }
 
 const fallbackExtraOptions = {
-  maximumCoverDiameter: Infinity,
+  breakDownThreshold: Infinity,
+  minimumCoverDiameter: 0,
+  coverExtraRadius: 0, // equivalent to covering circles rather than points
+  mergeOverlaps: true,
   coverMethod: 'simple',
 };
 
@@ -98,17 +104,9 @@ function mergeSolver(points, mergingDistance, extraOptions) {
   // second, create a circle for each [pt1, pt2]
   // final, merge overlapping circles into a bigger circle
   // after final, check if exceed maximum, break them down if necessary
-  const { maximumCoverDiameter, coverMethod } = /*
-   */ { ...fallbackExtraOptions, ...extraOptions };
-  if (maximumCoverDiameter < mergingDistance) {
-    console.warn(
-      `maximumCoverDiameter < mergingDistance: ${maximumCoverDiameter} < ${mergingDistance}`
-    );
-    maximumCoverDiameter = mergingDistance;
-  }
-
+  const options = { ...fallbackExtraOptions, ...extraOptions };
   const updateCircleMethod =
-    coverMethods[coverMethod] ?? invalidArgument(coverMethod);
+    coverMethods[options.coverMethod] ?? invalidArgument(options.coverMethod);
 
   const pairs = [];
   for (const [i, j, [x1, y1], [x2, y2]] of entryPairs(points)) {
@@ -134,31 +132,43 @@ function mergeSolver(points, mergingDistance, extraOptions) {
     }
   }
 
+  const updateCircle = (c) => {
+    c[updateCircleMethod](points);
+    let [x, y, r] = c.circle;
+    r += options.coverExtraRadius;
+    r = Math.max(r, options.minimumCoverDiameter / 2);
+    c.circle = [x, y, r];
+  };
+
+  // TODO need re-check if any newly points can be added into circles
+
   const covers = [...new Set(Object.values(chained))];
-  covers.forEach((c) => c[updateCircleMethod](points));
-  let dirty = true;
-  while (dirty) {
-    dirty = false;
-    for (const [i, j, c1, c2] of entryPairs(covers)) {
-      const [x1, y1, r1] = c1.circle;
-      const [x2, y2, r2] = c2.circle;
-      if (Math.hypot(x2 - x1, y2 - y1) < r1 + r2) {
-        c1.indexes.push(...c2.indexes);
-        c1[updateCircleMethod](points);
-        covers.splice(j, 1);
-        dirty = true;
-        console.log('dirty found');
-        break;
+  covers.forEach((c) => updateCircle(c));
+  if (options.mergeOverlaps) {
+    let dirty = true;
+    while (dirty) {
+      dirty = false;
+      for (const [i, j, c1, c2] of entryPairs(covers)) {
+        const [x1, y1, r1] = c1.circle;
+        const [x2, y2, r2] = c2.circle;
+        if (Math.hypot(x2 - x1, y2 - y1) < r1 + r2) {
+          c1.indexes.push(...c2.indexes);
+          updateCircle(c1);
+          covers.splice(j, 1);
+          dirty = true;
+          break;
+        }
       }
     }
   }
 
-  for (const c of covers) {
-    const [x, y, r] = c.circle;
-    if (r > maximumCoverDiameter) {
-      console.warn('TODO: implement break down');
-    }
-  }
+  // TODO breakDownThreshold
+  // for (const c of covers) {
+  //   const [x, y, r] = c.circle;
+  //   if (r > maximumCoverDiameter) {
+  //     console.warn('TODO: implement break down');
+  //   }
+  // }
 
   const remains = new Set(points.keys());
   for (const c of covers) {
