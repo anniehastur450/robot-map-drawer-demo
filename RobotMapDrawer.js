@@ -22,7 +22,7 @@ const fallbackConfig = {
   /* inertia dragging related */
 
   /* merging related */
-  mergingPx: 50,
+  mergingPx: 32,
   coverMethod: 'simple', // simple, smallest, mean or median
 };
 
@@ -479,6 +479,7 @@ class MarkerList {
         ids: new Set(indexes.map((i) => markers[i].id)),
         circle,
       })),
+      merging,
     };
   }
   previousMarkerDifferences() {
@@ -556,7 +557,7 @@ class MarkerList {
   }
   updateMarkerCamera() {
     this.updateMarkerDomTree();
-    const { remains, covers } = this.solveMerging();
+    const { remains, covers, merging } = this.solveMerging();
     const transform = this.comparePreviousCovers(
       new Set(this.cached.prevCovers ?? []),
       new Set(covers)
@@ -576,11 +577,12 @@ class MarkerList {
 
     // update all covers
     const remainingCovers = new Set(covers);
-    const { prevToCurrMap } = transform;
+    const { prevToCurrMap, currFromPrevMap } = transform;
     const updateCover = (circle, el) => {
       const [x, y, r] = circle;
+      const dr = Math.max(r, merging);
       const baseD = 32; // 32px
-      const cs = (r * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
+      const cs = (dr * 2 * this.drawer.ratios.screenPxByMapUnit) / baseD;
       el.style.setProperty('--cs', `${cs}`);
       el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
       el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
@@ -600,15 +602,20 @@ class MarkerList {
         }
       });
     };
+    console.log(this.cached.prevCovers, this.doms.covers.childElementCount);
     this.cached.prevCovers?.forEach((prev) => {
       const el = prev.el;
       if (prevToCurrMap.has(prev)) {
         const currCovers = [...prevToCurrMap.get(prev)];
-        if (currCovers.length == 1) {
+        if (
+          prevToCurrMap.get(prev).size == 1 &&
+          currFromPrevMap.get(currCovers[0]).size == 1 // terrible fix: TOFIX
+        ) {
           // do not add or remove
-          const [curr] = currCovers;
+          const [curr] = [...prevToCurrMap.get(prev)];
           curr.el = el;
           updateCover(curr.circle, el);
+          el.textContent = `${curr.ids.size}`;
           remainingCovers.delete(curr);
         } else {
           willRemove(el);
