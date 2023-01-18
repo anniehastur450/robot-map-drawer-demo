@@ -25,6 +25,8 @@ const fallbackConfig = {
   mergingPx: 32,
   markerSizePx: 16, // size for merge cover to cover
   coverMethod: 'simple', // 'simple', 'smallest', 'mean' or 'median'
+  /* hover popup related */
+  hoverPopupDelayMs: 750,
 };
 
 /* calculate cursor velocity in last [ms] ms */
@@ -84,6 +86,23 @@ function clamp(value, min, max) {
 //   };
 // }
 
+function createHooks() {
+  return {
+    addHooks(listeners) {
+      for (const [type, listener] of Object.entries(listeners)) {
+        if (!this[type]) {
+          const fn = (...args) => {
+            this[type].hooks.forEach((x) => x(...args));
+          };
+          fn.hooks = [];
+          this[type] = fn;
+        }
+        this[type].hooks.push(listener);
+      }
+    },
+  };
+}
+
 class RobotMapDrawer {
   constructor(config) {
     this.config = { ...fallbackConfig, ...config };
@@ -94,6 +113,7 @@ class RobotMapDrawer {
     this.doms = {};
     this.ratios = {};
     this.viewAnimations = null;
+    this.eventHooks = createHooks(); // for hover popup to use only
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -126,6 +146,7 @@ class RobotMapDrawer {
     this.camera.offset[1] += dy;
     this.camera.zoom = next;
     this.updateCamera();
+    this.eventHooks.zoomchange?.();
   }
   zoomIn(cursor = null) {
     const { next } = this.findZoomLevel(this.camera.zoom);
@@ -215,6 +236,9 @@ class RobotMapDrawer {
       if (v > 0) {
         t1 = t2;
         timer = request(timeout);
+      } else {
+        // finished
+        this.viewAnimations?.stop();
       }
     };
     let t1 = performance.now();
@@ -223,6 +247,7 @@ class RobotMapDrawer {
       stop: () => {
         cancel(timer);
         this.viewAnimations = null;
+        this.eventHooks.panend?.();
       },
     };
   }
@@ -316,6 +341,7 @@ class RobotMapDrawer {
 
         <!-- drag panel -->
         <div class="absolute w-full h-full z-40 select-none"
+        ${attr((el) => (this.doms.drag = el) /* for hover popup to use only */)}
         ${events({
           mousedown: (e) => {
             this.viewAnimations?.stop();
@@ -323,9 +349,18 @@ class RobotMapDrawer {
             // otherwise no mouse event when cursor outside iframe
             let [prevX, prevY] = [e.clientX, e.clientY];
             const trails = [[prevX, prevY, performance.now()]];
-            e.target.classList.add('cursor-move');
+            let dragging = false; // only for hooks to use
+            const moveThreshold = 2; // minimum distance before movement is considered dragging
             const mousemove = (e) => {
               const [x, y] = [e.clientX, e.clientY];
+              if (!dragging) {
+                if (Math.hypot(x - prevX, y - prevY) < moveThreshold) {
+                  return;
+                }
+                dragging = true;
+                e.target.classList.add('cursor-move');
+                this.eventHooks.panstart?.();
+              }
               this.camera.offset[0] += (x - prevX) / this.zoomedRatioScreenPx;
               this.camera.offset[1] += (y - prevY) / this.zoomedRatioScreenPx;
               this.updateCamera();
@@ -336,8 +371,12 @@ class RobotMapDrawer {
               trails.push([e.clientX, e.clientY, performance.now()]);
               const { velocity, velocityX, velocityY } =
                 /* */ calculateVelocity(trails, 50);
-              if (velocity > 0) {
+              if (dragging && velocity > 0) {
                 this.startInertiaDragging(velocityX, velocityY);
+              } else if (dragging) {
+                this.eventHooks.panend?.();
+              } else {
+                this.eventHooks.panclick?.();
               }
               e.target.classList.remove('cursor-move');
               window.removeEventListener('mousemove', mousemove);
@@ -421,42 +460,107 @@ class HoverPopup {
     this.drawer = drawer;
     this.doms = {};
     this.mousemove = null;
+    this.states = {};
   }
   getEl() {
     if (this.doms.el) {
       throw new Error('assert false');
     }
+    this.setupEventHooks();
+    // mr-[-9999px] is to avoid text wrapping when container at right boundary
+    // see https://stackoverflow.com/questions/24307922/why-does-an-absolute-position-element-wrap-based-on-its-parents-right-bound
     return h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50">
-        <div class="w-100px h-30px bg-white shadow rounded">
-          Info
-        </div>
+      <div class="absolute mr-[-9999px] bg-white shadow rounded left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50">
+        Info is baba
       </div>
     `.let((el) => (this.doms.el = el));
+  }
+  setupEventHooks() {
+    this.drawer.eventHooks.addHooks({
+      panstart: () => {
+        console.log('start');
+        this.states.panning = true;
+        this.states.hovering?.cancel();
+      },
+      panend: () => {
+        console.log('end');
+        this.states.panning = false;
+        if (this.states.prevCursor) {
+          const [x, y] = this.states.prevCursor;
+          this.testHover(x, y);
+        }
+      },
+      zoomchange: () => {
+        console.log('zm');
+      },
+      panclick: () => {
+        console.log('pc');
+      },
+    });
+  }
+  setHover(el) {
+    const dragEl = this.drawer.doms.drag;
+    dragEl.classList.add('!cursor-pointer');
+    this.states.hovering = {
+      el,
+      timer: setTimeout(() => {
+        console.log('123');
+      }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
+      cancel: () => {
+        console.log('cancel');
+        dragEl.classList.remove('!cursor-pointer');
+        clearTimeout(this.states.hovering?.timer);
+        this.states.hovering = null;
+      },
+    };
+  }
+  setShow() {
+    this.states.showing = {};
+  }
+  testHover(x, y) {
+    const elData = this.drawer.markerList.elData;
+    const hovers = [...document.elementsFromPoint(x, y)] //
+      .filter((x) => elData.has(x) && !elData.get(x).hidden);
+    if (hovers.length !== 0 && !this.states.panning) {
+      const [el] = hovers;
+      if (this.states.hovering?.el !== el) {
+        this.states.hovering?.cancel();
+        this.setHover(el);
+      }
+    } else {
+      this.states.hovering?.cancel();
+    }
   }
   registerGlobalMousemoveEvent(e) {
     if (this.mousemove) {
       return;
     }
-    const dragEl = e.target;
     const root = this.doms.el;
     const mousemove = (e) => {
-      const elData = this.drawer.markerList.elData;
       const [x, y] = [e.clientX, e.clientY];
-      const hovers = [...document.elementsFromPoint(x, y)] //
-        .filter((x) => elData.has(x) && !elData.get(x).hidden);
-      if (hovers.length !== 0) {
-        dragEl.classList.add('!cursor-pointer');
-        const [el] = hovers;
-        const r0 = dragEl.getBoundingClientRect();
-        const r1 = el.getBoundingClientRect();
-        const x = r1.left - r0.left;
-        const y = r1.top - r0.top;
-        root.style.setProperty('--x', `${x}px`);
-        root.style.setProperty('--y', `${y + r1.height}px`);
-        console.log(hovers);
-      } else {
-        dragEl.classList.remove('!cursor-pointer');
+      this.states.prevCursor = [x, y];
+      this.testHover(x, y);
+      // const hovers = [...document.elementsFromPoint(x, y)] //
+      //   .filter((x) => elData.has(x) && !elData.get(x).hidden);
+      // if (hovers.length !== 0 && !this.states.panning) {
+      //   const [el] = hovers;
+      //   if (this.states.hovering?.el !== el) {
+      //     this.states.hovering?.cancel();
+      //     this.setHover(el);
+      //   }
+      //   // const r0 = dragEl.getBoundingClientRect();
+      //   // const r1 = el.getBoundingClientRect();
+      //   // const x = r1.left - r0.left;
+      //   // const y = r1.top - r0.top;
+      //   // root.style.setProperty('--x', `${x}px`);
+      //   // root.style.setProperty('--y', `${y + r1.height}px`);
+      //   // // console.log(hovers);
+      // } else {
+      //   this.states.hovering?.cancel();
+      // }
+      if (false) {
+        window.removeEventListener('mousemove', mousemove);
+        this.mousemove = null;
       }
     };
     this.mousemove = mousemove;
