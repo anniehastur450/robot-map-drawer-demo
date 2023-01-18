@@ -421,9 +421,9 @@ class RobotMapDrawer {
         </div>
 
         <!-- scale bar -->
-        <div class="absolute bg-white/50 px-1 bottom-2 right-2 z-50 pointer-events-none select-none">
+        <div class="absolute bg-white/50 text-black/90 px-1 bottom-2 right-2 z-50 pointer-events-none select-none">
           <div class="flex items-center">
-            <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black b-t-none"
+            <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black/90 b-t-none"
             ${attr((el) => (this.doms.scaleBar = el))} ></div>
             <div class="ml-1"
             ${attr((el) => (this.doms.scaleText = el))} >1km</div>
@@ -461,6 +461,7 @@ class HoverPopup {
     this.doms = {};
     this.mousemove = null;
     this.states = {};
+    this.contents = {};
   }
   getEl() {
     if (this.doms.el) {
@@ -470,16 +471,18 @@ class HoverPopup {
     // mr-[-9999px] is to avoid text wrapping when container at right boundary
     // see https://stackoverflow.com/questions/24307922/why-does-an-absolute-position-element-wrap-based-on-its-parents-right-bound
     return h`
-      <div class="absolute mr-[-9999px] bg-white shadow rounded left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50">
-        Info is baba
-      </div>
-    `.let((el) => (this.doms.el = el));
+      <div class="absolute mr-[-9999px] bg-white shadow rounded left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50 pointer-events-none"></div>
+    `.let((el) => {
+      el.style.setProperty('--op', `${0}`);
+      this.doms.el = el;
+    });
   }
   setupEventHooks() {
     this.drawer.eventHooks.addHooks({
       panstart: () => {
         console.log('start');
         this.states.panning = true;
+        this.states.delays = null;
         this.states.hovering?.cancel();
       },
       panend: () => {
@@ -491,6 +494,8 @@ class HoverPopup {
         }
       },
       zoomchange: () => {
+        this.states.delays = null;
+        this.states.hovering?.cancel();
         console.log('zm');
       },
       panclick: () => {
@@ -505,22 +510,96 @@ class HoverPopup {
       el,
       timer: setTimeout(() => {
         console.log('123');
+        this.setShow();
       }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
       cancel: () => {
         console.log('cancel');
+        this.states.showing?.cancel();
         dragEl.classList.remove('!cursor-pointer');
         clearTimeout(this.states.hovering?.timer);
         this.states.hovering = null;
       },
     };
   }
+  setContent() {
+    const data = this.drawer.markerList.elData.get(this.states.hovering.el);
+    console.log('data', data);
+    const el = (() => {
+      const markerEntry = (id) => {
+        const listView = this.drawer.markerList.defaultListView;
+        const { name, x, y, color } = this.drawer.markerList.markers.get(id);
+        const [x2, y2] = listView.toUserLocation([x, y]);
+        const locText = listView.options.toCoordinateText(x2, y2);
+        return h`
+          <div class="px-2 group/entry flex flex-col">
+            <button class="btn group flex justify-between items-baseline">
+              <div class="text-lg text-orange-600 underline decoration-2 group-hover:no-underline"
+              ${attr((el) => (el.textContent = `${name}`))} ></div>
+              <div class="ml-5 text-xs text-black/50 group-hover:text-black/70"
+              ${attr((el) => (el.textContent = locText))} ></div>
+            </button>
+            <div class="text-xs text-black/50 b-b b-b-solid b-b-gray-200 group-last/entry:b-b-0">
+              <div ${attr((el) => (el.textContent = `id: ${id}`))} ></div>
+            </div>
+          </div>
+        `;
+      };
+      if (data.type === 'cover') {
+        const { ids, circle } = data.cover;
+        return h`
+          <div class="py-1">
+            <div class="px-2 text-sm text-black/50" ${attr((el) => {
+              el.textContent = `${ids.length} marker${
+                ids.length != 1 ? 's' : ''
+              }`;
+            })} ></div>
+            ${ids.map(markerEntry)}
+          </div>
+        `.el;
+      } else if (data.type === 'marker') {
+        return h`
+          <div class="py-1">
+            ${markerEntry(data.id)}
+          </div>
+        `.el;
+      }
+    })();
+    this.doms.el.appendChild(el);
+    this.contents.handle?.detach();
+    this.contents.handle = {
+      el,
+      detach: () => {
+        el.remove();
+      },
+    };
+    // calc suitable position
+  }
   setShow() {
-    this.states.showing = {};
+    const el = this.doms.el;
+    this.states.delays = 50; // 50 ms
+    this.setContent();
+    el.style.setProperty('--op', `${1}`);
+    el.classList.remove('pointer-events-none');
+    this.states.showing = {
+      cancel: () => {
+        console.log('show cancel');
+        el.style.setProperty('--op', `${0}`);
+        el.classList.add('pointer-events-none');
+        this.states.showing = null;
+      },
+    };
+  }
+  isHoverable(el) {
+    const elData = this.drawer.markerList.elData;
+    if (!elData.has(el)) {
+      return false;
+    }
+    const { active, hidden } = elData.get(el);
+    return active && !hidden;
   }
   testHover(x, y) {
-    const elData = this.drawer.markerList.elData;
     const hovers = [...document.elementsFromPoint(x, y)] //
-      .filter((x) => elData.has(x) && !elData.get(x).hidden);
+      .filter((x) => this.isHoverable(x));
     if (hovers.length !== 0 && !this.states.panning) {
       const [el] = hovers;
       if (this.states.hovering?.el !== el) {
@@ -585,7 +664,11 @@ const fallbackListViewOptions = {
    */
   origin: 'center',
   '+x': 'right', // left or right
-  '+y': 'top', // top or bottom. for math axis, it is top, for computer screen axis, it is bottom
+  '+y': 'bottom', // top or bottom. for math axis, it is top, for computer screen axis, it is bottom
+  /* used by hover popup */
+  toCoordinateText: (x, y) => {
+    return `(${x}, ${y})`;
+  },
 };
 
 // TODO use it
@@ -610,9 +693,19 @@ class MarkerList {
       markerExtra: new Map(),
     };
     this.elData = new WeakMap(); // this is for elementsFromPoint to look up only
+    this.listViews = {
+      default: null, // default list view for hover popup
+    };
+  }
+  get defaultListView() {
+    return this.listViews.default ?? new MarkerListView(this, {});
   }
   getListView(options) {
-    return new MarkerListView(this, options);
+    const listView = new MarkerListView(this, options);
+    if (this.listViews.default == null) {
+      this.listViews.default = listView;
+    }
+    return listView;
   }
   getEl() {
     if (this.doms.el) {
@@ -672,7 +765,7 @@ class MarkerList {
       update: (marker, opacity) => {
         const [mapW, mapH] = this.drawer.config.mapSize;
         const { name, x, y, color } = marker; // TODO color
-        el.textContent = name;
+        el.textContent = `${name}`;
         // why use % instead of px? answer: avoid transition animation when changing aspect
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
@@ -892,6 +985,10 @@ class MarkerListView {
     const [CO_x, CO_y] = this.options.origin;
     const [CA_x, CA_y] = [OA_x + CO_x, OA_y + CO_y];
     return [CA_x, CA_y];
+  }
+  /* set default for hover popup to use this list view */
+  setDefault() {
+    this.mainList.listViews.default = this;
   }
   add(id, { name, x, y, color }) {
     const [x2, y2] = this.toInternalLocation([x, y]);
