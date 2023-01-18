@@ -592,6 +592,8 @@ class HoverPopup {
         this.testHover();
       },
       pandown: () => {
+        // this is for the situation where mouse click is for stopping panning inertia
+        // which will trigger panclick, but not mean to click the marker
         this.states.pandown = {
           cached: this.states.hovering,
         };
