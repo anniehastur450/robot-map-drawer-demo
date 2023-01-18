@@ -449,6 +449,83 @@ class RobotMapDrawer {
 
 //////////////////////// HOVER POPUP ////////////////////////
 
+/* deduce position for hover popup */
+function deduceAppropriatePosition(viewport, target, size) {
+  const [x0, y0, w0, h0] = viewport;
+  const [x1, y1, w1, h1] = target;
+  const [w2, h2] = size;
+  // some essential
+  const [u0, v0] = [x0 + w0, y0 + h0];
+  const [u1, v1] = [x1 + w1, y1 + h1];
+  const resolve = (st, ed, it, w) => {
+    it = Math.min(it, ed - w);
+    it = Math.max(it, st);
+    return it;
+  };
+  // try bottom
+  if (h2 <= v0 - v1) {
+    const y = v1;
+    const x = resolve(x0, u0, x1, w2);
+    return [x, y];
+  }
+  // try right
+  if (w2 <= u0 - u1) {
+    const x = u1;
+    const y = resolve(y0, v0, y1, h2);
+    return [x, y];
+  }
+  // try left
+  if (w2 <= x1 - x0) {
+    const x = x1 - w2;
+    const y = resolve(y0, v0, y1, h2);
+    return [x, y];
+  }
+  // try top
+  if (h2 <= y1 - y0) {
+    const y = y1 - h2;
+    const x = resolve(x0, u0, x1, w2);
+    return [x, y];
+  }
+  // nothing success, just use bottom
+  const y = v1;
+  const x = resolve(x0, u0, x1, w2);
+  return [x, y];
+}
+
+/* additional hover regions */
+function additionalHoverRegions(popup, target) {
+  const [x0, y0, w0, h0] = popup;
+  const [x1, y1, w1, h1] = target;
+  // some essential
+  const [u0, v0] = [x0 + w0, y0 + h0];
+  const [u1, v1] = [x1 + w1, y1 + h1];
+  const x = clamp(x0, x1, (x1 + u1) / 2);
+  const u = clamp(u0, (x1 + u1) / 2, u1);
+  const y = clamp(y0, y1, (y1 + v1) / 2);
+  const v = clamp(v0, (y1 + v1) / 2, v1);
+  const res = [[x, y, u - x, v - y]];
+  const minmax = (a, b) => [Math.min(a, b), Math.max(a, b)];
+  const [x4, x3] = minmax(x, x0);
+  const [u3, u4] = minmax(u, u0);
+  const [y4, y3] = minmax(y, y0);
+  const [v3, v4] = minmax(v, v0);
+  if (x3 < u3) {
+    res.push([x3, y4, u3 - x3, v4 - y4]);
+  }
+  if (y3 < v3) {
+    res.push([x4, y3, u4 - x4, v3 - y3]);
+  }
+  return res.length > 1 ? res : [];
+}
+
+function paddingRect([x, y, w, h], p) {
+  return [x + p, y + p, w - 2 * p, h - 2 * p];
+}
+
+function boundingContains([x, y, w, h], [x2, y2]) {
+  return x <= x2 && x2 <= x + w && y <= y2 && y2 <= y + h;
+}
+
 class HoverPopup {
   /*
     notes: some detail of google map hover logic:
@@ -462,6 +539,10 @@ class HoverPopup {
     this.mousemove = null;
     this.states = {};
     this.contents = {};
+    this.options = {
+      viewportPaddingPx: 8, // default viewport padding 8px
+      attachSpaceingPx: 0, // spacing between popup and hovering element
+    };
   }
   getEl() {
     if (this.doms.el) {
@@ -471,7 +552,7 @@ class HoverPopup {
     // mr-[-9999px] is to avoid text wrapping when container at right boundary
     // see https://stackoverflow.com/questions/24307922/why-does-an-absolute-position-element-wrap-based-on-its-parents-right-bound
     return h`
-      <div class="absolute mr-[-9999px] bg-white shadow rounded left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50 pointer-events-none"></div>
+      <div class="absolute mr-[-9999px] bg-white shadow rounded b b-solid b-gray-200 left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50 pointer-events-none"></div>
     `.let((el) => {
       el.style.setProperty('--op', `${0}`);
       this.doms.el = el;
@@ -520,6 +601,23 @@ class HoverPopup {
         this.states.hovering = null;
       },
     };
+  }
+  updatePosition() {
+    const { clientWidth: vw, clientHeight: vh } = document.documentElement;
+    const p = this.options.viewportPaddingPx;
+    const viewport = paddingRect([0, 0, vw, vh], p);
+    const rect = this.states.hovering.el.getBoundingClientRect();
+    let target = [rect.left, rect.top, rect.width, rect.height];
+    target = paddingRect(target, -this.options.attachSpaceingPx);
+    const root = this.doms.el;
+    // root.style.setProperty('--x', `${0}px`);
+    // root.style.setProperty('--y', `${0}px`);
+    const rect2 = root.getBoundingClientRect();
+    const size = [rect2.width, rect2.height];
+    const [x, y] = deduceAppropriatePosition(viewport, target, size);
+    const rect3 = this.drawer.doms.el.getBoundingClientRect();
+    root.style.setProperty('--x', `${x - rect3.left}px`);
+    root.style.setProperty('--y', `${y - rect3.top}px`);
   }
   setContent() {
     const data = this.drawer.markerList.elData.get(this.states.hovering.el);
@@ -572,11 +670,11 @@ class HoverPopup {
         el.remove();
       },
     };
-    // calc suitable position
+    this.updatePosition();
   }
   setShow() {
     const el = this.doms.el;
-    this.states.delays = 50; // 50 ms
+    this.states.delays = Math.min(50, this.drawer.config.hoverPopupDelayMs); // 50 ms
     this.setContent();
     el.style.setProperty('--op', `${1}`);
     el.classList.remove('pointer-events-none');
