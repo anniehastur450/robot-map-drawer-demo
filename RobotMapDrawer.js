@@ -616,21 +616,10 @@ class HoverPopup {
     });
   }
   markerClicked(id) {
-    // focus to this marker
-    const { x, y } = this.drawer.markerList.markers.get(id);
-    this.drawer.camera.offset = [-x, -y];
-    this.drawer.setZoom(this.drawer.config.focusingZoom);
+    this.drawer.markerList.focusMarker(id);
   }
   coverClicked(cover) {
-    // set camera to contain all markers
-    const [x, y, r] = cover.circle;
-    const rect = this.drawer.doms.el.getBoundingClientRect();
-    const [W, H] = [rect.width, rect.height];
-    const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
-    const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
-    this.drawer.camera.offset = [-x, -y];
-    const prevZoom = this.drawer.camera.zoom;
-    this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
+    this.drawer.markerList.focusCover(cover);
   }
   getEssentialBoundings() {
     if (!this.states.hovering) {
@@ -928,6 +917,22 @@ class MarkerList {
       this.listViews.default = listView;
     }
     return listView;
+  }
+  focusMarker(id) {
+    // focus to this marker
+    const { x, y } = this.drawer.markerList.markers.get(id);
+    this.drawer.camera.offset = [-x, -y];
+    this.drawer.setZoom(this.drawer.config.focusingZoom);
+  }
+  focusCover(cover) {
+    // set camera to contain all markers
+    const [x, y, r] = cover.circle;
+    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const [W, H] = [rect.width, rect.height];
+    const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
+    const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
+    this.drawer.camera.offset = [-x, -y];
+    this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
   }
   getEl() {
     if (this.doms.el) {
