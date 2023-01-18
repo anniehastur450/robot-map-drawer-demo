@@ -341,7 +341,6 @@ class RobotMapDrawer {
 
         <!-- drag panel -->
         <div class="absolute w-full h-full z-40 select-none"
-        ${attr((el) => (this.doms.drag = el) /* for hover popup to use only */)}
         ${events({
           mousedown: (e) => {
             this.viewAnimations?.stop();
@@ -421,7 +420,7 @@ class RobotMapDrawer {
         </div>
 
         <!-- scale bar -->
-        <div class="absolute bg-white/50 text-black/90 px-1 bottom-2 right-2 z-50 pointer-events-none select-none">
+        <div class="absolute bg-white/50 text-black/90 px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none">
           <div class="flex items-center">
             <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black/90 b-t-none"
             ${attr((el) => (this.doms.scaleBar = el))} ></div>
@@ -526,6 +525,19 @@ function boundingContains([x, y, w, h], [x2, y2]) {
   return x <= x2 && x2 <= x + w && y <= y2 && y2 <= y + h;
 }
 
+function intersectBounding(rect, rect2) {
+  const [x0, y0, w0, h0] = rect;
+  const [x1, y1, w1, h1] = rect2;
+  // some essential
+  const [u0, v0] = [x0 + w0, y0 + h0];
+  const [u1, v1] = [x1 + w1, y1 + h1];
+  const x = Math.max(x0, x1);
+  const u = Math.min(u0, u1);
+  const y = Math.max(y0, y1);
+  const v = Math.min(v0, v1);
+  return [x, y, u - x, v - y];
+}
+
 class HoverPopup {
   /*
     notes: some detail of google map hover logic:
@@ -541,6 +553,7 @@ class HoverPopup {
     this.contents = {};
     this.options = {
       viewportPaddingPx: 8, // default viewport padding 8px
+      /* TODO FIX setting this value also lead offset to another direction */
       attachSpaceingPx: 0, // spacing between popup and hovering element
     };
   }
@@ -585,43 +598,56 @@ class HoverPopup {
     });
   }
   setHover(el) {
-    const dragEl = this.drawer.doms.drag;
-    dragEl.classList.add('!cursor-pointer');
     this.states.hovering = {
       el,
       timer: setTimeout(() => {
-        console.log('123');
         this.setShow();
       }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
       cancel: () => {
-        console.log('cancel');
+        this.states.cursor.setPointer(false);
         this.states.showing?.cancel();
-        dragEl.classList.remove('!cursor-pointer');
         clearTimeout(this.states.hovering?.timer);
         this.states.hovering = null;
       },
     };
   }
+  getEssentialBoundings() {
+    if (!this.states.hovering) {
+      throw new Error('no hovering element');
+    }
+    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const drawer = [rect.left, rect.top, rect.width, rect.height];
+    const rect2 = this.states.hovering.el.getBoundingClientRect();
+    const target = [rect2.left, rect2.top, rect2.width, rect2.height];
+    const rect3 = this.doms.el.getBoundingClientRect();
+    const popup = [rect3.left, rect3.top, rect3.width, rect3.height];
+    return {
+      drawer,
+      target,
+      popup,
+    };
+  }
   updatePosition() {
+    if (!this.states.hovering) {
+      throw new Error('no hovering element');
+    }
     const { clientWidth: vw, clientHeight: vh } = document.documentElement;
     const p = this.options.viewportPaddingPx;
     const viewport = paddingRect([0, 0, vw, vh], p);
-    const rect = this.states.hovering.el.getBoundingClientRect();
-    let target = [rect.left, rect.top, rect.width, rect.height];
+    let { drawer, target, popup } = this.getEssentialBoundings();
+    target = intersectBounding(target, drawer);
     target = paddingRect(target, -this.options.attachSpaceingPx);
-    const root = this.doms.el;
-    // root.style.setProperty('--x', `${0}px`);
-    // root.style.setProperty('--y', `${0}px`);
-    const rect2 = root.getBoundingClientRect();
-    const size = [rect2.width, rect2.height];
+    const [, , ...size] = popup; // size = [w, h]
     const [x, y] = deduceAppropriatePosition(viewport, target, size);
-    const rect3 = this.drawer.doms.el.getBoundingClientRect();
-    root.style.setProperty('--x', `${x - rect3.left}px`);
-    root.style.setProperty('--y', `${y - rect3.top}px`);
+    const root = this.doms.el;
+    root.style.setProperty('--x', `${x - drawer[0]}px`);
+    root.style.setProperty('--y', `${y - drawer[1]}px`);
   }
   setContent() {
+    if (!this.states.hovering) {
+      throw new Error('no hovering element');
+    }
     const data = this.drawer.markerList.elData.get(this.states.hovering.el);
-    console.log('data', data);
     const el = (() => {
       const markerEntry = (id) => {
         const listView = this.drawer.markerList.defaultListView;
@@ -631,7 +657,7 @@ class HoverPopup {
         return h`
           <div class="px-2 group/entry flex flex-col">
             <button class="btn group flex justify-between items-baseline">
-              <div class="text-lg text-orange-600 underline decoration-2 group-hover:no-underline"
+              <div class="text-lg text-orange-600 group-hover:underline decoration-2"
               ${attr((el) => (el.textContent = `${name}`))} ></div>
               <div class="ml-5 text-xs text-black/50 group-hover:text-black/70"
               ${attr((el) => (el.textContent = locText))} ></div>
@@ -673,19 +699,47 @@ class HoverPopup {
     this.updatePosition();
   }
   setShow() {
-    const el = this.doms.el;
+    const root = this.doms.el;
     this.states.delays = Math.min(50, this.drawer.config.hoverPopupDelayMs); // 50 ms
     this.setContent();
-    el.style.setProperty('--op', `${1}`);
-    el.classList.remove('pointer-events-none');
+    root.style.setProperty('--op', `${1}`);
+    root.classList.remove('pointer-events-none');
     this.states.showing = {
       cancel: () => {
-        console.log('show cancel');
-        el.style.setProperty('--op', `${0}`);
-        el.classList.add('pointer-events-none');
+        root.style.setProperty('--op', `${0}`);
+        root.classList.add('pointer-events-none');
         this.states.showing = null;
       },
     };
+  }
+  getPopupBoundings() {
+    if (!this.states.showing) {
+      return [];
+    }
+    let { target, popup } = this.getEssentialBoundings();
+    const res = additionalHoverRegions(popup, target);
+    return [popup, ...res];
+  }
+  __debug_visualizePopupBoundings() {
+    if (!this.__debug) this.__debug = { doms: {} };
+    this.__debug.doms.popupBoundings?.remove();
+    h`
+      <div>
+        ${this.getPopupBoundings().map(([x, y, w, h0]) => {
+          return h`
+            <div class="fixed left-[var(--x)] top-[var(--y)] w-[var(--w)] h-[var(--h)] bg-black/20 pointer-events-none"
+            ${attr((el) => {
+              el.style.setProperty('--x', `${x}px`);
+              el.style.setProperty('--y', `${y}px`);
+              el.style.setProperty('--w', `${w}px`);
+              el.style.setProperty('--h', `${h0}px`);
+            })} ></div>
+          `;
+        })}
+      </div>
+    `
+      .let((el) => (this.__debug.doms.popupBoundings = el))
+      .attach(this.doms.el);
   }
   isHoverable(el) {
     const elData = this.drawer.markerList.elData;
@@ -696,48 +750,62 @@ class HoverPopup {
     return active && !hidden;
   }
   testHover(x, y) {
+    if (this.states.panning) {
+      this.states.hovering?.cancel();
+      return false;
+    }
     const hovers = [...document.elementsFromPoint(x, y)] //
       .filter((x) => this.isHoverable(x));
-    if (hovers.length !== 0 && !this.states.panning) {
+    this.states.cursor.setPointer(hovers.length !== 0);
+    // this.__debug_visualizePopupBoundings();
+    for (const bounding of this.getPopupBoundings()) {
+      if (boundingContains(bounding, [x, y])) {
+        return true;
+      }
+    }
+    if (hovers.length !== 0) {
       const [el] = hovers;
       if (this.states.hovering?.el !== el) {
         this.states.hovering?.cancel();
         this.setHover(el);
       }
+      return true;
     } else {
       this.states.hovering?.cancel();
     }
+    return false;
+  }
+  getCursorHandle(target) {
+    const handle = {
+      pointer: false,
+      setPointer(pointer) {
+        if (pointer) {
+          target.classList.add('!cursor-pointer');
+        } else {
+          target.classList.remove('!cursor-pointer');
+        }
+        handle.pointer = pointer;
+      },
+    };
+    return handle;
   }
   registerGlobalMousemoveEvent(e) {
     if (this.mousemove) {
       return;
     }
-    const root = this.doms.el;
+    this.states.cursor = this.getCursorHandle(e.target);
     const mousemove = (e) => {
       const [x, y] = [e.clientX, e.clientY];
       this.states.prevCursor = [x, y];
-      this.testHover(x, y);
-      // const hovers = [...document.elementsFromPoint(x, y)] //
-      //   .filter((x) => elData.has(x) && !elData.get(x).hidden);
-      // if (hovers.length !== 0 && !this.states.panning) {
-      //   const [el] = hovers;
-      //   if (this.states.hovering?.el !== el) {
-      //     this.states.hovering?.cancel();
-      //     this.setHover(el);
-      //   }
-      //   // const r0 = dragEl.getBoundingClientRect();
-      //   // const r1 = el.getBoundingClientRect();
-      //   // const x = r1.left - r0.left;
-      //   // const y = r1.top - r0.top;
-      //   // root.style.setProperty('--x', `${x}px`);
-      //   // root.style.setProperty('--y', `${y + r1.height}px`);
-      //   // // console.log(hovers);
-      // } else {
-      //   this.states.hovering?.cancel();
-      // }
-      if (false) {
+      if (this.testHover(x, y)) {
+        return;
+      }
+      const rect = this.drawer.doms.el.getBoundingClientRect();
+      const bounding = [rect.left, rect.top, rect.width, rect.height];
+      if (!boundingContains(bounding, [x, y])) {
         window.removeEventListener('mousemove', mousemove);
         this.mousemove = null;
+        this.states.cursor = null;
       }
     };
     this.mousemove = mousemove;
