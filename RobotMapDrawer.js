@@ -27,6 +27,7 @@ const fallbackConfig = {
   coverMethod: 'simple', // 'simple', 'smallest', 'mean' or 'median'
   /* hover popup related */
   hoverPopupDelayMs: 750,
+  focusingZoom: 100, // zoom level of clicking a marker
 };
 
 /* calculate cursor velocity in last [ms] ms */
@@ -343,6 +344,7 @@ class RobotMapDrawer {
         <div class="absolute w-full h-full z-40 select-none"
         ${events({
           mousedown: (e) => {
+            this.eventHooks.pandown?.();
             this.viewAnimations?.stop();
             // do not use preventDefault() to avoid selection, use select-none instead,
             // otherwise no mouse event when cursor outside iframe
@@ -574,28 +576,70 @@ class HoverPopup {
   setupEventHooks() {
     this.drawer.eventHooks.addHooks({
       panstart: () => {
-        console.log('start');
         this.states.panning = true;
-        this.states.delays = null;
+        this.states.delays = null; // reset hovering
         this.states.hovering?.cancel();
       },
       panend: () => {
-        console.log('end');
         this.states.panning = false;
-        if (this.states.prevCursor) {
-          const [x, y] = this.states.prevCursor;
-          this.testHover(x, y);
-        }
+        this.testHover();
       },
       zoomchange: () => {
-        this.states.delays = null;
+        this.states.delays = null; // reset hovering
         this.states.hovering?.cancel();
-        console.log('zm');
+        this.testHover();
       },
+      pandown: () => {
+
+      },
+      /* to have more accurate click and down must be the same element */
       panclick: () => {
-        console.log('pc');
+        if (!this.states.hovering) {
+          return;
+        }
+        const data = this.drawer.markerList.elData.get(this.states.hovering.el);
+        if (data.type === 'cover') {
+          this.coverClicked(data.cover);
+        } else if (data.type === 'marker') {
+          this.markerClicked(data.id);
+        }
       },
     });
+  }
+  markerClicked(id) {
+    // focus to this marker
+    const { x, y } = this.drawer.markerList.markers.get(id);
+    this.drawer.camera.offset = [-x, -y];
+    this.drawer.setZoom(this.drawer.config.focusingZoom);
+  }
+  coverClicked(cover) {
+    // set camera to contain all markers
+    const markers = cover.ids.map((x) => this.drawer.markerList.markers.get(x));
+    // TODO remove this
+    // const xs = markers.map(({ x }) => x);
+    // const ys = markers.map(({ y }) => y);
+    // const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+    // const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+    // const x = (x0 + x1) / 2;
+    // const y = (y0 + y1) / 2;
+    // const w = x1 - x0;
+    // const h = y1 - y0;
+    // const rect = this.drawer.doms.el.getBoundingClientRect();
+    // const [W, H] = [rect.width, rect.height];
+    // const markerSizePx = this.drawer.config.markerSizePx; // this value also used in cover focusing
+    // const zoomX =
+    //   (W - markerSizePx) / (w * this.drawer.ratios.screenPxByMapUnit);
+    // const zoomY =
+    //   (H - markerSizePx) / (h * this.drawer.ratios.screenPxByMapUnit);
+    // this.drawer.camera.offset = [-x, -y];
+    // this.drawer.setZoom(Math.min(zoomX, zoomY) * 100);
+    const [x, y, r] = cover.circle;
+    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const [W, H] = [rect.width, rect.height];
+    const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
+    const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
+    this.drawer.camera.offset = [-x, -y];
+    this.drawer.setZoom(Math.min(zoomX, zoomY) * 100);
   }
   getEssentialBoundings() {
     if (!this.states.hovering) {
@@ -634,26 +678,29 @@ class HoverPopup {
       throw new Error('no hovering element');
     }
     const data = this.drawer.markerList.elData.get(this.states.hovering.el);
+    const entryDom = (id) => {
+      const listView = this.drawer.markerList.defaultListView;
+      const { name, x, y, color } = this.drawer.markerList.markers.get(id);
+      const [x2, y2] = listView.toUserLocation([x, y]);
+      const locText = listView.options.toCoordinateText(x2, y2);
+      return h`
+        <div class="px-2 group/entry flex flex-col">
+          <button class="btn group flex justify-between items-baseline"
+          ${events({
+            click: () => this.markerClicked(id),
+          })} >
+            <div class="text-lg text-orange-600 group-hover:underline decoration-2"
+            ${attr((el) => (el.textContent = `${name}`))} ></div>
+            <div class="ml-5 text-xs text-black/50 group-hover:text-black/70"
+            ${attr((el) => (el.textContent = locText))} ></div>
+          </button>
+          <div class="text-xs text-black/50 b-b b-b-solid b-b-gray-200 group-last/entry:b-b-0">
+            <div ${attr((el) => (el.textContent = `id: ${id}`))} ></div>
+          </div>
+        </div>
+      `;
+    };
     const el = (() => {
-      const markerEntry = (id) => {
-        const listView = this.drawer.markerList.defaultListView;
-        const { name, x, y, color } = this.drawer.markerList.markers.get(id);
-        const [x2, y2] = listView.toUserLocation([x, y]);
-        const locText = listView.options.toCoordinateText(x2, y2);
-        return h`
-          <div class="px-2 group/entry flex flex-col">
-            <button class="btn group flex justify-between items-baseline">
-              <div class="text-lg text-orange-600 group-hover:underline decoration-2"
-              ${attr((el) => (el.textContent = `${name}`))} ></div>
-              <div class="ml-5 text-xs text-black/50 group-hover:text-black/70"
-              ${attr((el) => (el.textContent = locText))} ></div>
-            </button>
-            <div class="text-xs text-black/50 b-b b-b-solid b-b-gray-200 group-last/entry:b-b-0">
-              <div ${attr((el) => (el.textContent = `id: ${id}`))} ></div>
-            </div>
-          </div> 
-        `;
-      };
       if (data.type === 'cover') {
         const { ids, circle } = data.cover;
         return h`
@@ -663,19 +710,17 @@ class HoverPopup {
                 ids.length != 1 ? 's' : ''
               }`;
             })} ></div>
-            ${ids.map(markerEntry)}
+            ${ids.map(entryDom)}
           </div>
         `.el;
       } else if (data.type === 'marker') {
         return h`
           <div class="py-1">
-            ${markerEntry(data.id)}
+            ${entryDom(data.id)}
           </div>
         `.el;
       }
     })();
-    // this.doms.el.appendChild(el);
-    // this.contents.handle?.detach();
     const handle = {
       el,
       attach: () => {
@@ -688,7 +733,6 @@ class HoverPopup {
       },
     };
     return handle;
-    // this.updatePosition();
   }
   setShow() {
     const root = this.doms.el;
@@ -759,7 +803,12 @@ class HoverPopup {
     const { active, hidden } = elData.get(el);
     return active && !hidden;
   }
-  testHover(x, y) {
+  testHover(point = null) {
+    if ((point ?? this.states.prevCursor) == null) {
+      console.warn('prev cursor is not set');
+      return;
+    }
+    const [x, y] = point ?? this.states.prevCursor;
     if (this.states.panning) {
       this.states.hovering?.cancel();
       return false;
@@ -805,7 +854,7 @@ class HoverPopup {
     const mousemove = (e) => {
       const [x, y] = [e.clientX, e.clientY];
       this.states.prevCursor = [x, y];
-      if (this.testHover(x, y)) {
+      if (this.testHover()) {
         return;
       }
       const rect = this.drawer.doms.el.getBoundingClientRect();

@@ -10,6 +10,7 @@ const mapSize = [80, 36]; // w x h, in meters
 const drawer = new RobotMapDrawer({
   mapImgUrl,
   mapSize,
+  focusingZoom: 300,
 });
 
 drawer.attach(document.getElementById('main-drawer'));
