@@ -597,20 +597,6 @@ class HoverPopup {
       },
     });
   }
-  setHover(el) {
-    this.states.hovering = {
-      el,
-      timer: setTimeout(() => {
-        this.setShow();
-      }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
-      cancel: () => {
-        this.states.cursor.setPointer(false);
-        this.states.showing?.cancel();
-        clearTimeout(this.states.hovering?.timer);
-        this.states.hovering = null;
-      },
-    };
-  }
   getEssentialBoundings() {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
@@ -643,7 +629,7 @@ class HoverPopup {
     root.style.setProperty('--x', `${x - drawer[0]}px`);
     root.style.setProperty('--y', `${y - drawer[1]}px`);
   }
-  setContent() {
+  getContentDom(root) {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
@@ -688,20 +674,26 @@ class HoverPopup {
         `.el;
       }
     })();
-    this.doms.el.appendChild(el);
-    this.contents.handle?.detach();
-    this.contents.handle = {
+    // this.doms.el.appendChild(el);
+    // this.contents.handle?.detach();
+    const handle = {
       el,
+      attach: () => {
+        root.appendChild(el);
+        return handle;
+      },
       detach: () => {
         el.remove();
+        return handle;
       },
     };
-    this.updatePosition();
+    return handle;
+    // this.updatePosition();
   }
   setShow() {
     const root = this.doms.el;
     this.states.delays = Math.min(50, this.drawer.config.hoverPopupDelayMs); // 50 ms
-    this.setContent();
+    this.updatePosition();
     root.style.setProperty('--op', `${1}`);
     root.classList.remove('pointer-events-none');
     this.states.showing = {
@@ -711,6 +703,24 @@ class HoverPopup {
         this.states.showing = null;
       },
     };
+  }
+  setHover(el) {
+    this.states.hovering = {
+      el,
+      timer: setTimeout(() => {
+        this.setShow();
+      }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
+      cancel: () => {
+        this.states.cursor.setPointer(false);
+        this.states.showing?.cancel();
+        clearTimeout(this.states.hovering?.timer);
+        this.states.hovering = null;
+        this.contents.handle?.detach();
+        this.contents.handle = null;
+      },
+    };
+    this.contents.handle?.detach();
+    this.contents.handle = this.getContentDom(this.doms.el).attach();
   }
   getPopupBoundings() {
     if (!this.states.showing) {
@@ -775,7 +785,11 @@ class HoverPopup {
     }
     return false;
   }
-  getCursorHandle(target) {
+  registerGlobalMousemoveEvent(e) {
+    if (this.mousemove) {
+      return;
+    }
+    const target = e.target;
     const handle = {
       pointer: false,
       setPointer(pointer) {
@@ -787,13 +801,7 @@ class HoverPopup {
         handle.pointer = pointer;
       },
     };
-    return handle;
-  }
-  registerGlobalMousemoveEvent(e) {
-    if (this.mousemove) {
-      return;
-    }
-    this.states.cursor = this.getCursorHandle(e.target);
+    this.states.cursor = handle;
     const mousemove = (e) => {
       const [x, y] = [e.clientX, e.clientY];
       this.states.prevCursor = [x, y];
