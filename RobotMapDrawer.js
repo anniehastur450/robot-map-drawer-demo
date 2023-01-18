@@ -591,10 +591,17 @@ class HoverPopup {
         this.states.hovering?.cancel();
         this.testHover();
       },
-      pandown: () => {},
+      pandown: () => {
+        this.states.pandown = {
+          cached: this.states.hovering,
+        };
+      },
       /* to have more accurate click and down must be the same element */
       panclick: () => {
         if (!this.states.hovering) {
+          return;
+        }
+        if (this.states.hovering !== this.states.pandown?.cached) {
           return;
         }
         const data = this.drawer.markerList.elData.get(this.states.hovering.el);
