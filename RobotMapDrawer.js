@@ -566,10 +566,12 @@ class HoverPopup {
     this.setupEventHooks();
     // mr-[-9999px] is to avoid text wrapping when container at right boundary
     // see https://stackoverflow.com/questions/24307922/why-does-an-absolute-position-element-wrap-based-on-its-parents-right-bound
+    // fixed! left-0! top-0! is for avoiding this popup affecting body scrollbar
     return h`
-      <div class="absolute mr-[-9999px] bg-white shadow rounded b b-solid b-gray-200 left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity z-50 pointer-events-none"></div>
+      <div class="absolute mr-[-9999px] bg-white shadow rounded b b-solid b-gray-200 left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity max-w-[calc(100vw-var(--p2))] max-h-[calc(100vh-var(--p2))] overflow-auto z-50 pointer-events-none fixed! left-0! top-0!"></div>
     `.let((el) => {
       el.style.setProperty('--op', `${0}`);
+      el.style.setProperty('--p2', `${this.options.viewportPaddingPx * 2}px`);
       this.doms.el = el;
     });
   }
@@ -733,8 +735,14 @@ class HoverPopup {
     this.updatePosition();
     root.style.setProperty('--op', `${1}`);
     root.classList.remove('pointer-events-none');
+    // only first popup (cuz uno css load) will make scroll bar, that is why using fixed! left-0! top-0!
+    // remove only once is enough
+    root.classList.remove('fixed!', 'left-0!', 'top-0!');
     this.states.showing = {
       cancel: () => {
+        // TODO: properly remove element from page
+        // Description: after disappearing, the element is still there
+        // therefore, if window resized (and this list is long), that might causing scroll bar to appear
         root.style.setProperty('--op', `${0}`);
         root.classList.add('pointer-events-none');
         this.states.showing = null;
@@ -748,16 +756,15 @@ class HoverPopup {
         this.setShow();
       }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
       cancel: () => {
-        this.states.cursor.setPointer(false);
+        this.states.cursor?.setPointer(false);
         this.states.showing?.cancel();
         clearTimeout(this.states.hovering?.timer);
         this.states.hovering = null;
-        this.contents.handle?.detach();
-        this.contents.handle = null;
       },
     };
     this.contents.handle?.detach();
     this.contents.handle = this.getContentDom(this.doms.el).attach();
+    this.updatePosition();
   }
   getPopupBoundings() {
     if (!this.states.showing) {
@@ -808,7 +815,7 @@ class HoverPopup {
     }
     const hovers = [...document.elementsFromPoint(x, y)] //
       .filter((x) => this.isHoverable(x));
-    this.states.cursor.setPointer(hovers.length !== 0);
+    this.states.cursor?.setPointer(hovers.length !== 0);
     // this.__debug_visualizePopupBoundings();
     for (const bounding of this.getPopupBoundings()) {
       if (boundingContains(bounding, [x, y])) {
