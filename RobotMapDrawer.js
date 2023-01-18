@@ -589,9 +589,7 @@ class HoverPopup {
         this.states.hovering?.cancel();
         this.testHover();
       },
-      pandown: () => {
-
-      },
+      pandown: () => {},
       /* to have more accurate click and down must be the same element */
       panclick: () => {
         if (!this.states.hovering) {
@@ -612,34 +610,29 @@ class HoverPopup {
     this.drawer.camera.offset = [-x, -y];
     this.drawer.setZoom(this.drawer.config.focusingZoom);
   }
-  coverClicked(cover) {
+  coverClicked(cover, recursive = false) {
     // set camera to contain all markers
-    const markers = cover.ids.map((x) => this.drawer.markerList.markers.get(x));
-    // TODO remove this
-    // const xs = markers.map(({ x }) => x);
-    // const ys = markers.map(({ y }) => y);
-    // const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
-    // const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
-    // const x = (x0 + x1) / 2;
-    // const y = (y0 + y1) / 2;
-    // const w = x1 - x0;
-    // const h = y1 - y0;
-    // const rect = this.drawer.doms.el.getBoundingClientRect();
-    // const [W, H] = [rect.width, rect.height];
-    // const markerSizePx = this.drawer.config.markerSizePx; // this value also used in cover focusing
-    // const zoomX =
-    //   (W - markerSizePx) / (w * this.drawer.ratios.screenPxByMapUnit);
-    // const zoomY =
-    //   (H - markerSizePx) / (h * this.drawer.ratios.screenPxByMapUnit);
-    // this.drawer.camera.offset = [-x, -y];
-    // this.drawer.setZoom(Math.min(zoomX, zoomY) * 100);
     const [x, y, r] = cover.circle;
     const rect = this.drawer.doms.el.getBoundingClientRect();
     const [W, H] = [rect.width, rect.height];
     const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
     const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
     this.drawer.camera.offset = [-x, -y];
-    this.drawer.setZoom(Math.min(zoomX, zoomY) * 100);
+    const prevZoom = this.drawer.camera.zoom;
+    this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
+    // bad recursive (?), TODO remove this
+    // if (this.drawer.camera.zoom > prevZoom) {
+    //   const data = this.drawer.markerList.elData.get(cover.handle.el);
+    //   if (data.cover && data.active) {
+    //     console.log('recursively zoom cover');
+    //     const final = this.coverClicked(data.cover, true);
+    //     if (!recursive) {
+    //       this.drawer.setZoom(prevZoom);
+    //       this.drawer.setZoom(final);
+    //     }
+    //   }
+    // }
+    // return this.drawer.camera.zoom;
   }
   getEssentialBoundings() {
     if (!this.states.hovering) {
