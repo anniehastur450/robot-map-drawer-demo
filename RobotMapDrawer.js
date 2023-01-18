@@ -651,7 +651,7 @@ class HoverPopup {
             <div class="text-xs text-black/50 b-b b-b-solid b-b-gray-200 group-last/entry:b-b-0">
               <div ${attr((el) => (el.textContent = `id: ${id}`))} ></div>
             </div>
-          </div>
+          </div> 
         `;
       };
       if (data.type === 'cover') {
