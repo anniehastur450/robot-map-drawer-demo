@@ -621,7 +621,7 @@ class HoverPopup {
     this.drawer.camera.offset = [-x, -y];
     this.drawer.setZoom(this.drawer.config.focusingZoom);
   }
-  coverClicked(cover, recursive = false) {
+  coverClicked(cover) {
     // set camera to contain all markers
     const [x, y, r] = cover.circle;
     const rect = this.drawer.doms.el.getBoundingClientRect();
@@ -631,19 +631,6 @@ class HoverPopup {
     this.drawer.camera.offset = [-x, -y];
     const prevZoom = this.drawer.camera.zoom;
     this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
-    // bad recursive (?), TODO remove this
-    // if (this.drawer.camera.zoom > prevZoom) {
-    //   const data = this.drawer.markerList.elData.get(cover.handle.el);
-    //   if (data.cover && data.active) {
-    //     console.log('recursively zoom cover');
-    //     const final = this.coverClicked(data.cover, true);
-    //     if (!recursive) {
-    //       this.drawer.setZoom(prevZoom);
-    //       this.drawer.setZoom(final);
-    //     }
-    //   }
-    // }
-    // return this.drawer.camera.zoom;
   }
   getEssentialBoundings() {
     if (!this.states.hovering) {
