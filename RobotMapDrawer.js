@@ -764,6 +764,9 @@ class HoverPopup {
     };
     this.contents.handle?.detach();
     this.contents.handle = this.getContentDom(this.doms.el).attach();
+    const root = this.doms.el;
+    /* avoid blinking twice when swithc to hover adjacent marker */
+    root.getAnimations({ subtree: true }).forEach((x) => x.finish());
     this.updatePosition();
   }
   getPopupBoundings() {
