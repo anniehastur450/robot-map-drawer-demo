@@ -115,6 +115,17 @@ class RobotMapDrawer {
     this.ratios = {};
     this.viewAnimations = null;
     this.eventHooks = createHooks(); // for hover popup to use only
+    /* 
+      hoverTargets:  // elData
+        key: el, value: {
+          type,   // which type it is
+          active, // element in tracking (therefore, false if element is being
+                  //   to removed and still in disappearing animation)
+          hidden, // tracking, but not visible (therefore not hoverable)
+          ...extra data
+        }
+     */
+    this.hoverTargets = new WeakMap(); // this is for elementsFromPoint to look up only
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -421,8 +432,8 @@ class RobotMapDrawer {
           </div>
         </div>
 
-        <!-- distant layer -->
-        
+        <!-- distant indicator layer -->
+        ${this.markerList.distants.getEl()}
 
         <!-- scale bar -->
         <div class="absolute bg-white/50 text-black/90 px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none">
@@ -609,7 +620,7 @@ class HoverPopup {
         if (this.states.hovering !== this.states.pandown?.cached) {
           return;
         }
-        const data = this.drawer.markerList.elData.get(this.states.hovering.el);
+        const data = this.drawer.hoverTargets.get(this.states.hovering.el);
         if (data.type === 'cover') {
           this.coverClicked(data.cover);
         } else if (data.type === 'marker') {
@@ -660,7 +671,7 @@ class HoverPopup {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
-    const data = this.drawer.markerList.elData.get(this.states.hovering.el);
+    const data = this.drawer.hoverTargets.get(this.states.hovering.el);
     const entryDom = (id) => {
       const listView = this.drawer.markerList.defaultListView;
       const { name, x, y, color } = this.drawer.markerList.markers.get(id);
@@ -787,11 +798,11 @@ class HoverPopup {
       .attach(this.doms.el);
   }
   isHoverable(el) {
-    const elData = this.drawer.markerList.elData;
-    if (!elData.has(el)) {
+    const targets = this.drawer.hoverTargets;
+    if (!targets.has(el)) {
       return false;
     }
-    const { active, hidden } = elData.get(el);
+    const { active, hidden } = targets.get(el);
     return active && !hidden;
   }
   testHover(point = null) {
@@ -861,7 +872,7 @@ class HoverPopup {
   }
 }
 
-//////////////////////// MARKER LIST ////////////////////////
+//////////////////////// DISTANT INDICATOR ////////////////////////
 
 function chevronRight() {
   // hero icons, chevron-right
@@ -872,6 +883,21 @@ function chevronRight() {
     </svg>
   `;
 }
+
+/* indicate distant markers */
+class DistantIndicator {
+  constructor(drawer) {
+    this.drawer = drawer;
+    this.doms = {};
+  }
+  getEl() {
+    return h`
+      <div></div>
+    `.let((el) => (this.doms.el = el));
+  }
+}
+
+//////////////////////// MARKER LIST ////////////////////////
 
 const fallbackListViewOptions = {
   /*
@@ -916,10 +942,10 @@ class MarkerList {
     this.cached = {
       markerExtra: new Map(),
     };
-    this.elData = new WeakMap(); // this is for elementsFromPoint to look up only
     this.listViews = {
       default: null, // default list view for hover popup
     };
+    this.distants = new DistantIndicator(drawer);
   }
   get defaultListView() {
     return this.listViews.default ?? new MarkerListView(this, {});
@@ -999,7 +1025,7 @@ class MarkerList {
     const el = h`
       <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
     `.el;
-    this.elData.set(el, { type: 'marker' });
+    this.drawer.hoverTargets.set(el, { type: 'marker' });
     const handle = {
       el,
       update: (marker, opacity) => {
@@ -1010,18 +1036,20 @@ class MarkerList {
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         el.style.setProperty('--op', `${opacity}`);
-        this.elData.get(el).id = marker.id;
-        this.elData.get(el).hidden = opacity == 0;
+        Object.assign(this.drawer.hoverTargets.get(el), {
+          id: marker.id,
+          hidden: opacity == 0,
+        });
         return handle;
       },
       attach: () => {
         root.appendChild(el);
-        this.elData.get(el).active = true;
+        this.drawer.hoverTargets.get(el).active = true;
         return handle;
       },
       detach: () => {
         el.remove();
-        this.elData.get(el).active = false;
+        this.drawer.hoverTargets.get(el).active = false;
         return handle;
       },
     };
@@ -1031,7 +1059,7 @@ class MarkerList {
     const el = h`
       <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700" ></div>
     `.el;
-    this.elData.set(el, { type: 'cover' });
+    this.drawer.hoverTargets.set(el, { type: 'cover' });
     const handle = {
       el,
       update: (cover) => {
@@ -1043,7 +1071,7 @@ class MarkerList {
         el.style.setProperty('--cs', `${cs}`);
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-        this.elData.get(el).cover = cover;
+        this.drawer.hoverTargets.get(el).cover = cover;
         return handle;
       },
       /* attach with fade in */
@@ -1056,7 +1084,7 @@ class MarkerList {
           observer.disconnect();
         });
         observer.observe(el);
-        this.elData.get(el).active = true;
+        this.drawer.hoverTargets.get(el).active = true;
         return handle;
       },
       /* detach with fade out */
@@ -1073,7 +1101,7 @@ class MarkerList {
             clearTimeout(timer);
           }
         });
-        this.elData.get(el).active = false;
+        this.drawer.hoverTargets.get(el).active = false;
         return handle;
       },
     };
