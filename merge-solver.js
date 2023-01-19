@@ -195,7 +195,8 @@ class Cover1D {
 }
 
 function mergeSolver1D(scalars, mergingDistance) {
-  const sorted = scalars.keys().sort((ia, ib) => scalars[ia] - scalars[ib]);
+  const sorted = [...scalars.keys()] //
+    .sort((ia, ib) => scalars[ia] - scalars[ib]);
   const groups = [];
   let tmp = [];
   for (let i = 0; i < sorted.length; i++) {
@@ -233,7 +234,7 @@ function mergeSolver1D(scalars, mergingDistance) {
   }
   const res = covers.map((x) => {
     const distant = new Cover1D(...x);
-    distant.updateSpan();
+    distant.updateSpan(scalars);
     return distant;
   });
   return res;
@@ -277,4 +278,4 @@ function distantSolver(points, bounding, mergingDistance) {
   };
 }
 
-export { mergeSolver };
+export { mergeSolver, distantSolver };

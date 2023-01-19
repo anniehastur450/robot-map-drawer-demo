@@ -1,5 +1,5 @@
 import { h, attr, events } from './dom-helper.js';
-import { mergeSolver } from './merge-solver.js';
+import { mergeSolver, distantSolver } from './merge-solver.js';
 
 const fallbackConfig = {
   mapImgUrl: null, //  required
@@ -892,8 +892,117 @@ class DistantIndicator {
   }
   getEl() {
     return h`
-      <div></div>
+      <div class="absolute w-full h-full overflow-hidden"></div>
     `.let((el) => (this.doms.el = el));
+  }
+  getIndicatorDom(region, x, y) {
+    const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
+    const el = h`
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] translate-1/2 scale-[3] text-slate-700/70"
+      ${attr((el) => {
+        el.style.setProperty('--x', `${x}px`);
+        el.style.setProperty('--y', `${y}px`);
+        el.style.setProperty('--r', `${rotate * 45}deg`);
+      })} >
+        <div class="">
+          ${chevronRight()}
+        </div>
+      </div>
+    `.el;
+
+    return el;
+  }
+  solveDistant() {
+    // indicator is for visible markers and cover
+    // so marker included in cover will not be counted
+    const zoomed = this.drawer.zoomedRatioScreenPx;
+    const data = [
+      ...this.drawer.markerList.cached.prevRemains.map((id) => {
+        const { x, y } = this.drawer.markerList.markers.get(id);
+        return { type: 'marker', id, x, y };
+      }),
+      ...this.drawer.markerList.cached.prevCovers.map((cover) => {
+        const [x, y, r] = cover.circle;
+        return { type: 'cover', cover, x, y };
+      }),
+    ];
+    const points = data.map(({ x, y }) => [x, y]);
+    const merging = this.drawer.config.mergingPx / zoomed;
+    const bounding = (() => {
+      const rect = this.drawer.doms.el.getBoundingClientRect();
+      const [ox, oy] = this.drawer.camera.offset;
+      const vw = rect.width / zoomed;
+      const vh = rect.height / zoomed;
+      const [x, y] = [-ox - vw / 2, -oy - vh / 2];
+      return [x, y, vw, vh];
+    })();
+    const solved = distantSolver(points, bounding, merging);
+    const mapper = ({ indexes, span }) => ({
+      data: indexes.map((i) => data[i]),
+      span,
+    });
+    return {
+      regions: solved.regions.map((x) => x.map((i) => data[i])),
+      top: /*    */ solved.top.map(mapper),
+      right: /*  */ solved.right.map(mapper),
+      bottom: /* */ solved.bottom.map(mapper),
+      left: /*   */ solved.left.map(mapper),
+    };
+  }
+  updateIndicator() {
+    const solved = this.solveDistant();
+    // quick impl, TODO transition and reusing dom
+    // 0  1  2
+    // 3  4  5
+    // 6  7  8
+    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const [x0, y0, w0, h0] = paddingRect([0, 0, rect.width, rect.height], 16);
+    const [u0, v0] = [x0 + w0, y0 + h0];
+    const corners = {
+      0: [x0, y0],
+      2: [u0, y0],
+      6: [x0, v0],
+      8: [u0, v0],
+    };
+    const childs = [];
+    for (const region of [0, 2, 6, 8]) {
+      if (solved.regions[region].length !== 0) {
+        childs.push(this.getIndicatorDom(region, ...corners[region]));
+      }
+    }
+    const zoomed = this.drawer.zoomedRatioScreenPx;
+    const [ox, oy] = this.drawer.camera.offset;
+    const cx = w0 / 2 + ox * zoomed;
+    const cy = h0 / 2 + oy * zoomed;
+    // top
+    for (const d of solved.top) {
+      const [c, r] = d.span;
+      const dx = cx + c * zoomed;
+      childs.push(this.getIndicatorDom(1, dx, y0));
+    }
+    // left
+    for (const d of solved.left) {
+      const [c, r] = d.span;
+      const dy = cy + c * zoomed;
+      childs.push(this.getIndicatorDom(3, x0, dy));
+    }
+    // right
+    for (const d of solved.right) {
+      const [c, r] = d.span;
+      const dx = cx + c * zoomed;
+      childs.push(this.getIndicatorDom(5, dx, v0));
+    }
+    // bottom
+    for (const d of solved.bottom) {
+      const [c, r] = d.span;
+      const dy = cy + c * zoomed;
+      childs.push(this.getIndicatorDom(7, u0, dy));
+    }
+
+    const root = this.doms.el;
+    root.innerHTML = '';
+    root.append(...childs);
+    console.log(childs);
   }
 }
 
@@ -1025,7 +1134,7 @@ class MarkerList {
     const el = h`
       <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
     `.el;
-    this.drawer.hoverTargets.set(el, { type: 'marker' });
+    const attachedData = { type: 'marker' };
     const handle = {
       el,
       update: (marker, opacity) => {
@@ -1036,30 +1145,29 @@ class MarkerList {
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         el.style.setProperty('--op', `${opacity}`);
-        Object.assign(this.drawer.hoverTargets.get(el), {
-          id: marker.id,
-          hidden: opacity == 0,
-        });
+        attachedData.id = marker.id;
+        attachedData.hidden = opacity == 0;
         return handle;
       },
       attach: () => {
         root.appendChild(el);
-        this.drawer.hoverTargets.get(el).active = true;
+        attachedData.active = true;
         return handle;
       },
       detach: () => {
         el.remove();
-        this.drawer.hoverTargets.get(el).active = false;
+        attachedData.active = false;
         return handle;
       },
     };
+    this.drawer.hoverTargets.set(el, attachedData);
     return handle;
   }
   getCoverDom(root2) {
     const el = h`
       <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700" ></div>
     `.el;
-    this.drawer.hoverTargets.set(el, { type: 'cover' });
+    const attachedData = { type: 'cover' };
     const handle = {
       el,
       update: (cover) => {
@@ -1071,7 +1179,7 @@ class MarkerList {
         el.style.setProperty('--cs', `${cs}`);
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-        this.drawer.hoverTargets.get(el).cover = cover;
+        attachedData.cover = cover;
         return handle;
       },
       /* attach with fade in */
@@ -1084,7 +1192,7 @@ class MarkerList {
           observer.disconnect();
         });
         observer.observe(el);
-        this.drawer.hoverTargets.get(el).active = true;
+        attachedData.active = true;
         return handle;
       },
       /* detach with fade out */
@@ -1101,10 +1209,11 @@ class MarkerList {
             clearTimeout(timer);
           }
         });
-        this.drawer.hoverTargets.get(el).active = false;
+        attachedData.active = false;
         return handle;
       },
     };
+    this.drawer.hoverTargets.set(el, attachedData);
     return handle;
   }
   updateMarkerDomTree() {
@@ -1171,7 +1280,11 @@ class MarkerList {
     for (const c of attaching) {
       c.handle = this.getCoverDom(this.doms.covers).update(c).attach();
     }
+    this.cached.prevRemains = solved.remains; // only for distant to use
     this.cached.prevCovers = solved.covers;
+
+    // update distant indicator
+    this.distants.updateIndicator();
   }
   setPendingUpdate() {
     // call updateCamera once for multiple addMarker in sync calls
