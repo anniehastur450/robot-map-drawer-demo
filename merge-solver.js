@@ -181,4 +181,22 @@ function mergeSolver(points, mergingDistance, extraOptions) {
   };
 }
 
+function distantSolver(points, bounding, mergingDistance) {
+  const [x0, y0, w0, h0] = bounding;
+  const [u0, v0] = [x0 + w0, y0 + h0];
+  const section = (val, st, ed) => {
+    return val < st ? 0 : val <= ed ? 1 : 2;
+  };
+  const regions = [...Array(9)].map((x) => []);
+  for (const [x, y] of points) {
+    const i = section(x, x0, u0);
+    const j = section(y, y0, v0);
+    regions[3 * j + i].push([i, j]);
+  }
+  // 0  1  2
+  // 3  4  5
+  // 6  7  8
+  
+}
+
 export { mergeSolver };
