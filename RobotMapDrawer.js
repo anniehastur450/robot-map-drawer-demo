@@ -104,6 +104,8 @@ function createHooks() {
   };
 }
 
+// to fix: animation is aborted when drawer size change
+
 class RobotMapDrawer {
   constructor(config) {
     this.config = { ...fallbackConfig, ...config };
@@ -889,6 +891,9 @@ class DistantIndicator {
   constructor(drawer) {
     this.drawer = drawer;
     this.doms = {};
+    this.options = {
+      indicatorPadding: 0, // distance between indicator and drawer boundary
+    };
   }
   getEl() {
     return h`
@@ -898,15 +903,13 @@ class DistantIndicator {
   getIndicatorDom(region, x, y) {
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
     const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] translate-1/2 scale-[3] text-slate-700/70"
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[3] text-slate-700/70 w-5 h-5"
       ${attr((el) => {
         el.style.setProperty('--x', `${x}px`);
         el.style.setProperty('--y', `${y}px`);
         el.style.setProperty('--r', `${rotate * 45}deg`);
       })} >
-        <div class="">
-          ${chevronRight()}
-        </div>
+        ${chevronRight()}
       </div>
     `.el;
 
@@ -929,10 +932,10 @@ class DistantIndicator {
     const points = data.map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx / zoomed;
     const bounding = (() => {
-      const rect = this.drawer.doms.el.getBoundingClientRect();
+      const [x0, y0, w0, h0] = this.getIndicatorBounding();
       const [ox, oy] = this.drawer.camera.offset;
-      const vw = rect.width / zoomed;
-      const vh = rect.height / zoomed;
+      const vw = w0 / zoomed;
+      const vh = h0 / zoomed;
       const [x, y] = [-ox - vw / 2, -oy - vh / 2];
       return [x, y, vw, vh];
     })();
@@ -949,14 +952,19 @@ class DistantIndicator {
       left: /*   */ solved.left.map(mapper),
     };
   }
+  getIndicatorBounding() {
+    const r = this.drawer.doms.el.getBoundingClientRect();
+    const p = this.options.indicatorPadding
+    const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
+    return [x0, y0, w0, h0]
+  }
   updateIndicator() {
     const solved = this.solveDistant();
     // quick impl, TODO transition and reusing dom
     // 0  1  2
     // 3  4  5
     // 6  7  8
-    const rect = this.drawer.doms.el.getBoundingClientRect();
-    const [x0, y0, w0, h0] = paddingRect([0, 0, rect.width, rect.height], 16);
+    const [x0, y0, w0, h0] = this.getIndicatorBounding();
     const [u0, v0] = [x0 + w0, y0 + h0];
     const corners = {
       0: [x0, y0],
@@ -972,8 +980,9 @@ class DistantIndicator {
     }
     const zoomed = this.drawer.zoomedRatioScreenPx;
     const [ox, oy] = this.drawer.camera.offset;
-    const cx = w0 / 2 + ox * zoomed;
-    const cy = h0 / 2 + oy * zoomed;
+    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const cx = rect.width / 2 + ox * zoomed;
+    const cy = rect.height / 2 + oy * zoomed;
     // top
     for (const d of solved.top) {
       const [c, r] = d.span;
@@ -989,14 +998,14 @@ class DistantIndicator {
     // right
     for (const d of solved.right) {
       const [c, r] = d.span;
-      const dx = cx + c * zoomed;
-      childs.push(this.getIndicatorDom(5, dx, v0));
+      const dy = cy + c * zoomed;
+      childs.push(this.getIndicatorDom(5, u0, dy));
     }
     // bottom
     for (const d of solved.bottom) {
       const [c, r] = d.span;
-      const dy = cy + c * zoomed;
-      childs.push(this.getIndicatorDom(7, u0, dy));
+      const dx = cx + c * zoomed;
+      childs.push(this.getIndicatorDom(7, dx, v0));
     }
 
     const root = this.doms.el;
