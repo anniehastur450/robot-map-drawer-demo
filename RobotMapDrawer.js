@@ -891,6 +891,7 @@ class DistantIndicator {
   constructor(drawer) {
     this.drawer = drawer;
     this.doms = {};
+    this.cached = {};
     this.options = {
       indicatorPadding: 0, // distance between indicator and drawer boundary
     };
@@ -903,7 +904,7 @@ class DistantIndicator {
   getIndicatorDom(region, x, y) {
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
     const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5"
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5 b-black b-1 b-solid bg-black/20"
       ${attr((el) => {
         el.style.setProperty('--x', `${x}px`);
         el.style.setProperty('--y', `${y}px`);
@@ -1391,5 +1392,7 @@ class MarkerListView {
     });
   }
 }
+
+// water level 1396, reviewing code...
 
 export { RobotMapDrawer };
