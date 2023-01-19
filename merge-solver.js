@@ -39,7 +39,7 @@ function median(numbers) {
 class Cover {
   constructor(...indexes) {
     this.indexes = indexes;
-    this.circle = null;
+    this.circle = null; // [x, y, r]
   }
   wetzlsUpdateCircle(points) {
     // use Welzl's algorithm
@@ -181,6 +181,64 @@ function mergeSolver(points, mergingDistance, extraOptions) {
   };
 }
 
+class Cover1D {
+  constructor(...indexes) {
+    this.indexes = indexes;
+    this.span = null; // [center, radius]
+  }
+  updateSpan(scalars) {
+    const s = this.indexes.map((i) => scalars[i]);
+    const [s0, s1] = [Math.min(...s), Math.max(...s)];
+    const [c, r] = [(s0 + s1) / 2, (s1 - s0) / 2];
+    this.span = [c, r];
+  }
+}
+
+function mergeSolver1D(scalars, mergingDistance) {
+  const sorted = scalars.keys().sort((ia, ib) => scalars[ia] - scalars[ib]);
+  const groups = [];
+  let tmp = [];
+  for (let i = 0; i < sorted.length; i++) {
+    tmp.push(sorted[i]);
+    const stay =
+      i + 1 < sorted.length &&
+      scalars[sorted[i + 1]] - scalars[sorted[i]] < mergingDistance;
+    if (!stay) {
+      groups.push(tmp);
+      tmp = [];
+    }
+  }
+  // break down
+  const covers = [];
+  for (const group of groups) {
+    const s = group.map((i) => scalars[i]);
+    const [s0, s1] = [s[0], s[s.length - 1]];
+    const d = s1 - s0;
+    const count = Math.max(1, Math.floor(d / mergingDistance));
+    let i = 0;
+    for (let c = 1; c < count; c++) {
+      const s2 = (d / count) * c;
+      for (let j = i; j < s.length; j++) {
+        if (s[j] < s2) {
+          // same cover
+          continue;
+        }
+        // exceeded
+        covers.push(group.slice(i, j));
+        i = j;
+        break;
+      }
+    }
+    covers.push(group.slice(i));
+  }
+  const res = covers.map((x) => {
+    const distant = new Cover1D(...x);
+    distant.updateSpan();
+    return distant;
+  });
+  return res;
+}
+
 function distantSolver(points, bounding, mergingDistance) {
   const [x0, y0, w0, h0] = bounding;
   const [u0, v0] = [x0 + w0, y0 + h0];
@@ -188,15 +246,35 @@ function distantSolver(points, bounding, mergingDistance) {
     return val < st ? 0 : val <= ed ? 1 : 2;
   };
   const regions = [...Array(9)].map((x) => []);
-  for (const [x, y] of points) {
+  for (const [index, [x, y]] of points.entries()) {
     const i = section(x, x0, u0);
     const j = section(y, y0, v0);
-    regions[3 * j + i].push([i, j]);
+    regions[3 * j + i].push(index);
   }
   // 0  1  2
   // 3  4  5
   // 6  7  8
-  
+  const solve = (indexes, scalarGetter) => {
+    const scalars = indexes.map((i) => scalarGetter(i));
+    const res = mergeSolver1D(scalars, mergingDistance);
+    for (const distant of res) {
+      // re-map indexes
+      distant.indexes = distant.indexes.map((i) => indexes[i]);
+    }
+    return res;
+  };
+  const top /*    */ = solve(regions[1], (i) => points[i][0]); // xs
+  const bottom /* */ = solve(regions[7], (i) => points[i][0]); // xs
+  const left /*   */ = solve(regions[3], (i) => points[i][1]); // ys
+  const right /*  */ = solve(regions[5], (i) => points[i][1]); // ys
+
+  return {
+    regions,
+    top,
+    right,
+    bottom,
+    left,
+  };
 }
 
 export { mergeSolver };
