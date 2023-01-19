@@ -452,7 +452,7 @@ class RobotMapDrawer {
 
       </div>
     `
-      .let((el) => this.registerEl(el))
+      .also((el) => this.registerEl(el))
       .attach(target);
   }
 
@@ -585,7 +585,7 @@ class HoverPopup {
     // fixed! left-0! top-0! is for avoiding this popup affecting body scrollbar
     return h`
       <div class="absolute mr-[-9999px] bg-white shadow rounded b b-solid b-gray-200 left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity max-w-[calc(100vw-var(--p2))] max-h-[calc(100vh-var(--p2))] overflow-auto z-50 pointer-events-none fixed! left-0! top-0!"></div>
-    `.let((el) => {
+    `.also((el) => {
       el.style.setProperty('--op', `${0}`);
       el.style.setProperty('--p2', `${this.options.viewportPaddingPx * 2}px`);
       this.doms.el = el;
@@ -796,7 +796,7 @@ class HoverPopup {
         })}
       </div>
     `
-      .let((el) => (this.__debug.doms.popupBoundings = el))
+      .also((el) => (this.__debug.doms.popupBoundings = el))
       .attach(this.doms.el);
   }
   isHoverable(el) {
@@ -899,12 +899,13 @@ class DistantIndicator {
   getEl() {
     return h`
       <div class="absolute w-full h-full overflow-hidden"></div>
-    `.let((el) => (this.doms.el = el));
+    `.also((el) => (this.doms.el = el));
   }
   getIndicatorDom(region, x, y) {
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
+    // b-black b-1 b-solid bg-black/20
     const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5 b-black b-1 b-solid bg-black/20"
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5 "
       ${attr((el) => {
         el.style.setProperty('--x', `${x}px`);
         el.style.setProperty('--y', `${y}px`);
@@ -1104,7 +1105,7 @@ class MarkerList {
         <div class="absolute w-full h-full"
         ${attr((el) => (this.doms.covers = el))} ></div>
       </div>
-    `.let((el) => (this.doms.el = el));
+    `.also((el) => (this.doms.el = el));
   }
   solveMerging() {
     const zoomed = this.drawer.zoomedRatioScreenPx;

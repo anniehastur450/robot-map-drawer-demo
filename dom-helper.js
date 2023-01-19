@@ -36,8 +36,8 @@ function h(strings, ...values) {
   replacements.forEach((fn) => fn(div));
 
   const handle = {
-    // like kotlin let
-    let: (fn) => {
+    // this should be kotlin also, not let =.=
+    also: (fn) => {
       fn(handle.el);
       return handle;
     },
