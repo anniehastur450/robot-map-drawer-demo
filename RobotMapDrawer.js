@@ -903,13 +903,15 @@ class DistantIndicator {
   getIndicatorDom(region, x, y) {
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
     const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[3] text-slate-700/70 w-5 h-5"
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5"
       ${attr((el) => {
         el.style.setProperty('--x', `${x}px`);
         el.style.setProperty('--y', `${y}px`);
         el.style.setProperty('--r', `${rotate * 45}deg`);
       })} >
-        ${chevronRight()}
+        <div class="-translate-x-1 w-5 h-5">
+          ${chevronRight()}
+        </div>
       </div>
     `.el;
 
@@ -954,9 +956,9 @@ class DistantIndicator {
   }
   getIndicatorBounding() {
     const r = this.drawer.doms.el.getBoundingClientRect();
-    const p = this.options.indicatorPadding
+    const p = this.options.indicatorPadding;
     const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
-    return [x0, y0, w0, h0]
+    return [x0, y0, w0, h0];
   }
   updateIndicator() {
     const solved = this.solveDistant();
@@ -1011,7 +1013,6 @@ class DistantIndicator {
     const root = this.doms.el;
     root.innerHTML = '';
     root.append(...childs);
-    console.log(childs);
   }
 }
 
