@@ -67,6 +67,10 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
+function invalidAction(x) {
+  throw new Error(`invalid action: ${x}`);
+}
+
 // TODO use it
 // function comparePrevious(previous, next) {
 //   const changes = {};
@@ -118,8 +122,9 @@ class RobotMapDrawer {
     this.viewAnimations = null;
     this.eventHooks = createHooks(); // for hover popup to use only
     /* 
-      hoverTargets:  // elData
-        key: el, value: {
+      attached data, key: el, value: dom handle
+      hoverable has the following value: { 
+          hoverable, // true (= active && !hidden)
           type,   // which type it is
           active, // element in tracking (therefore, false if element is being
                   //   to removed and still in disappearing animation)
@@ -127,7 +132,7 @@ class RobotMapDrawer {
           ...extra data
         }
      */
-    this.hoverTargets = new WeakMap(); // this is for elementsFromPoint to look up only
+    this.attachedData = new WeakMap(); // this is for elementsFromPoint to look up only
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -462,6 +467,8 @@ class RobotMapDrawer {
 
   markerList = new MarkerList(this);
   hoverPopup = new HoverPopup(this);
+
+  getCamera() {}
 }
 
 //////////////////////// HOVER POPUP ////////////////////////
@@ -622,7 +629,7 @@ class HoverPopup {
         if (this.states.hovering !== this.states.pandown?.cached) {
           return;
         }
-        const data = this.drawer.hoverTargets.get(this.states.hovering.el);
+        const data = this.drawer.attachedData.get(this.states.hovering.el);
         if (data.type === 'cover') {
           this.coverClicked(data.cover);
         } else if (data.type === 'marker') {
@@ -673,10 +680,10 @@ class HoverPopup {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
-    const data = this.drawer.hoverTargets.get(this.states.hovering.el);
+    const data = this.drawer.attachedData.get(this.states.hovering.el);
     const entryDom = (id) => {
-      const listView = this.drawer.markerList.defaultListView;
-      const { name, x, y, color } = this.drawer.markerList.markers.get(id);
+      const listView = this.drawer.markerList.listViews.default;
+      const { name, x, y, color } = this.drawer.markerList.markerMap.get(id);
       const [x2, y2] = listView.toUserLocation([x, y]);
       const locText = listView.options.toCoordinateText(x2, y2);
       return h`
@@ -799,14 +806,6 @@ class HoverPopup {
       .also((el) => (this.__debug.doms.popupBoundings = el))
       .attach(this.doms.el);
   }
-  isHoverable(el) {
-    const targets = this.drawer.hoverTargets;
-    if (!targets.has(el)) {
-      return false;
-    }
-    const { active, hidden } = targets.get(el);
-    return active && !hidden;
-  }
   testHover(point = null) {
     if ((point ?? this.states.prevCursor) == null) {
       console.warn('prev cursor is not set');
@@ -818,7 +817,7 @@ class HoverPopup {
       return false;
     }
     const hovers = [...document.elementsFromPoint(x, y)] //
-      .filter((x) => this.isHoverable(x));
+      .filter((el) => this.drawer.attachedData.get(el)?.hoverable);
     this.states.cursor?.setPointer(hovers.length !== 0);
     // this.__debug_visualizePopupBoundings();
     for (const bounding of this.getPopupBoundings()) {
@@ -924,11 +923,11 @@ class DistantIndicator {
     // so marker included in cover will not be counted
     const zoomed = this.drawer.zoomedRatioScreenPx;
     const data = [
-      ...this.drawer.markerList.cached.prevRemains.map((id) => {
-        const { x, y } = this.drawer.markerList.markers.get(id);
+      ...this.drawer.markerList.tracking.cached.remains.map((id) => {
+        const { x, y } = this.drawer.markerList.markerMap.get(id);
         return { type: 'marker', id, x, y };
       }),
-      ...this.drawer.markerList.cached.prevCovers.map((cover) => {
+      ...this.drawer.markerList.tracking.cached.covers.map((cover) => {
         const [x, y, r] = cover.circle;
         return { type: 'cover', cover, x, y };
       }),
@@ -1036,55 +1035,45 @@ const fallbackListViewOptions = {
   origin: 'center',
   '+x': 'right', // left or right
   '+y': 'bottom', // top or bottom. for math axis, it is top, for computer screen axis, it is bottom
-  /* used by hover popup */
-  toCoordinateText: (x, y) => {
+  toCoordinateText: /* used by hover popup */ (x, y) => {
     return `(${x}, ${y})`;
   },
+  /* first user list view is used for default list view, which is used for hover popup */
+  isUser: true,
 };
-
-// TODO use it
-// class Emitter {
-//   // https://stackoverflow.com/questions/22186467/how-to-use-javascript-eventtarget
-//   constructor() {
-//     var delegate = document.createDocumentFragment();
-//     ['addEventListener', 'dispatchEvent', 'removeEventListener'].forEach(
-//       (f) => (this[f] = (...xs) => delegate[f](...xs))
-//     );
-//   }
-// }
 
 class MarkerList {
   constructor(drawer) {
     this.drawer = drawer;
-    this.pending = null;
-    this.doms = {};
-    this.nextId = 0;
-    this.markers = new Map();
-    this.cached = {
-      markerExtra: new Map(),
+    this.doms = {}; // (no root), markers, covers
+    this.tracking = {
+      markerHandle: new Map(), // key: id, value: marker dom handle
+      cached: {}, // remains, covers
+      actives: new Map(), // key el, value: marker or cover dom handle
     };
+    this.nextId = 0; // auto id if id is not given
+    this.markerMap = new Map(); // id => { id, name, x, y, color }
     this.listViews = {
-      default: null, // default list view for hover popup
+      default: new MarkerListView(this, { isUser: false }), // default list view for hover popup
     };
     this.distants = new DistantIndicator(drawer);
   }
-  get defaultListView() {
-    return this.listViews.default ?? new MarkerListView(this, {});
-  }
   getListView(options) {
     const listView = new MarkerListView(this, options);
-    if (this.listViews.default == null) {
+    if (!this.listViews.default.options.isUser) {
       this.listViews.default = listView;
     }
     return listView;
   }
   focusMarker(id) {
+    //TODO refactor
     // focus to this marker
-    const { x, y } = this.drawer.markerList.markers.get(id);
+    const { x, y } = this.markerMap.get(id);
     this.drawer.camera.offset = [-x, -y];
     this.drawer.setZoom(this.drawer.config.focusingZoom);
   }
   focusCover(cover) {
+    // TODO refactor
     // set camera to contain all markers
     const [x, y, r] = cover.circle;
     const rect = this.drawer.doms.el.getBoundingClientRect();
@@ -1095,9 +1084,7 @@ class MarkerList {
     this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
   }
   getEl() {
-    if (this.doms.el) {
-      throw new Error('assert false');
-    }
+    this._once = !this._once || invalidAction('already initialized');
     return h`
       <div class="absolute w-full h-full">
         <div class="absolute w-full h-full"
@@ -1105,15 +1092,15 @@ class MarkerList {
         <div class="absolute w-full h-full"
         ${attr((el) => (this.doms.covers = el))} ></div>
       </div>
-    `.also((el) => (this.doms.el = el));
+    `;
   }
   solveMerging() {
     const zoomed = this.drawer.zoomedRatioScreenPx;
-    const markers = [...this.markers.values()];
+    const markers = [...this.markerMap.values()];
     const points = markers.map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx / zoomed;
     const solved = mergeSolver(points, merging, {
-      // TODO: these options need more experiments for the look and feel
+      // TODO: these options need more experiments for better look and feel
       minimumCoverDiameter: merging * 2,
       // coverExtraRadius: this.drawer.config.markerSizePx / zoomed,
       coverMethod: this.drawer.config.coverMethod,
@@ -1126,29 +1113,18 @@ class MarkerList {
       })),
     };
   }
-  previousMarkerDifferences() {
-    const prev = new Set(this.cached.markerDoms.keys());
-    const curr = new Set(this.markers.keys());
-    const removed = new Set(); // in prev, not in curr
-    for (const id of prev) {
-      if (curr.has(id)) {
-        curr.delete(id);
-      } else {
-        removed.add(id);
-      }
-    }
-    return {
-      added: curr, // remaining of (curr - prev)
-      removed,
-    };
-  }
-  getMarkerDom(root) {
+  getMarkerDom() {
+    const root = this.doms.markers;
     const el = h`
       <div class="absolute -translate-1/2 scale-[calc(1/var(--s))] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] bg-amber/50"></div>
     `.el;
-    const attachedData = { type: 'marker' };
+    // attached data: id, hidden, active (for hover popup)
     const handle = {
+      type: 'marker',
       el,
+      get hoverable() {
+        return this.active && !this.hidden;
+      },
       update: (marker, opacity) => {
         const [mapW, mapH] = this.drawer.config.mapSize;
         const { name, x, y, color } = marker; // TODO color
@@ -1157,31 +1133,38 @@ class MarkerList {
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
         el.style.setProperty('--op', `${opacity}`);
-        attachedData.id = marker.id;
-        attachedData.hidden = opacity == 0;
+        handle.id = marker.id;
+        handle.hidden = opacity == 0;
         return handle;
       },
       attach: () => {
         root.appendChild(el);
-        attachedData.active = true;
+        handle.active = true;
+        this.tracking.actives.set(el, handle);
         return handle;
       },
       detach: () => {
         el.remove();
-        attachedData.active = false;
+        handle.active = false;
+        this.tracking.actives.delete(el);
         return handle;
       },
     };
-    this.drawer.hoverTargets.set(el, attachedData);
+    this.drawer.attachedData.set(el, handle);
     return handle;
   }
-  getCoverDom(root2) {
+  getCoverDom() {
+    const root = this.doms.covers;
     const el = h`
       <div class="absolute -translate-1/2 w-[32px] h-[32px] scale-[var(--cs)] left-[var(--x)] top-[var(--y)] transition-transform,opacity opacity-[var(--op)] rounded-full bg-blue/50 flex justify-center items-center text-slate-700" ></div>
     `.el;
-    const attachedData = { type: 'cover' };
+    // attached data: cover, active (for hover popup)
     const handle = {
+      type: 'cover',
       el,
+      get hoverable() {
+        return this.active;
+      },
       update: (cover) => {
         const [mapW, mapH] = this.drawer.config.mapSize;
         const [x, y, r] = cover.circle;
@@ -1191,25 +1174,28 @@ class MarkerList {
         el.style.setProperty('--cs', `${cs}`);
         el.style.setProperty('--x', `${(x / mapW) * 100 + 50}%`);
         el.style.setProperty('--y', `${(y / mapH) * 100 + 50}%`);
-        attachedData.cover = cover;
+        handle.cover = cover;
         return handle;
       },
       /* attach with fade in */
       attach: () => {
         el.style.setProperty('--op', `${0}`);
-        root2.appendChild(el);
+        root.appendChild(el);
         // make sure transition is triggered
+        // because transition is not triggered if element not in page
         const observer = new ResizeObserver((entries) => {
           el.style.setProperty('--op', `${1}`);
           observer.disconnect();
         });
         observer.observe(el);
-        attachedData.active = true;
+        handle.active = true;
+        this.tracking.actives.set(el, handle);
         return handle;
       },
       /* detach with fade out */
       detach: () => {
         el.style.setProperty('--op', `${0}`);
+        // TODO use getAnimations to check if there is transition
         const timer = setTimeout(() => {
           // fallback remove action
           console.warn('transitionend is not triggered');
@@ -1221,47 +1207,50 @@ class MarkerList {
             clearTimeout(timer);
           }
         });
-        attachedData.active = false;
+        handle.active = false;
+        this.tracking.actives.delete(el);
         return handle;
       },
     };
-    this.drawer.hoverTargets.set(el, attachedData);
+    this.drawer.attachedData.set(el, handle);
     return handle;
   }
   updateMarkerDomTree() {
-    const curr = new Set(this.markers.keys());
-    for (const id of [...this.cached.markerExtra.keys()]) {
+    const curr = new Set(this.markerMap.keys());
+    for (const id of [...this.tracking.markerHandle.keys()]) {
       if (curr.has(id)) {
         curr.delete(id); // exist in both prev and curr
       } else {
         // removed from curr
-        this.cached.markerExtra.get(id).detach();
-        this.cached.markerExtra.delete(id);
+        this.tracking.markerHandle.get(id).detach();
+        this.tracking.markerHandle.delete(id);
       }
     }
     for (const id of curr) {
       // newly added to curr
-      const handle = this.getMarkerDom(this.doms.markers).attach();
-      this.cached.markerExtra.set(id, handle);
+      const handle = this.getMarkerDom().attach();
+      this.tracking.markerHandle.set(id, handle);
     }
   }
   findUnchangedCovers(prevCovers, covers) {
     // unchange if both ids is equals ignore order
-    const res = [];
-    covers = new Set(covers);
-    for (const p of prevCovers ?? []) {
-      for (const c of covers) {
-        const equals =
-          p.ids.length === c.ids.length &&
-          new Set([...p.ids, ...c.ids]).size === p.ids.length;
-        if (equals) {
-          res.push([p, c]);
-          covers.delete(c);
+    const unchanged = [];
+    const detaching = new Set(prevCovers); // prevCovers can be null
+    const attaching = new Set(covers);
+    for (const p of [...detaching]) {
+      for (const c of attaching) {
+        if (p.ids.length !== c.ids.length) {
+          continue;
+        }
+        if (new Set([...p.ids, ...c.ids]).size === p.ids.length) {
+          unchanged.push([p, c]);
+          detaching.delete(p);
+          attaching.delete(c);
           break;
         }
       }
     }
-    return res;
+    return { unchanged, detaching, attaching };
   }
   updateMarkerCamera() {
     this.updateMarkerDomTree();
@@ -1269,51 +1258,43 @@ class MarkerList {
 
     // update all markers
     const remains = new Set(solved.remains);
-    for (const [id, handle] of this.cached.markerExtra) {
+    for (const [id, handle] of this.tracking.markerHandle) {
       const opacity = remains.has(id) ? 1 : 0;
-      handle.update(this.markers.get(id), opacity);
+      handle.update(this.markerMap.get(id), opacity);
     }
 
     // update all covers
-    const unchanged = this.findUnchangedCovers(
-      this.cached.prevCovers,
+    const { unchanged, detaching, attaching } = this.findUnchangedCovers(
+      this.tracking.cached.covers,
       solved.covers
     );
-    const detaching = new Set(this.cached.prevCovers);
-    const attaching = new Set(solved.covers);
     for (const [p, c] of unchanged) {
       c.handle = p.handle.update(c);
-      detaching.delete(p);
-      attaching.delete(c);
     }
     for (const p of detaching) {
       p.handle.detach();
     }
     for (const c of attaching) {
-      c.handle = this.getCoverDom(this.doms.covers).update(c).attach();
+      c.handle = this.getCoverDom().update(c).attach();
     }
-    this.cached.prevRemains = solved.remains; // only for distant to use
-    this.cached.prevCovers = solved.covers;
+    this.tracking.cached.remains = solved.remains; // only for distant to use
+    this.tracking.cached.covers = solved.covers;
 
     // update distant indicator
     this.distants.updateIndicator();
-  }
-  setPendingUpdate() {
-    // call updateCamera once for multiple addMarker in sync calls
-    if (this.pending == null) {
-      this.pending = setTimeout(() => {
-        this.pending = null;
-        this.drawer.updateCamera();
-      });
-    }
   }
   addMarker(id, marker) {
     if (id == null) {
       id = this.nextId;
       this.nextId++;
     }
-    this.markers.set(id, { ...marker, id });
-    this.setPendingUpdate();
+    this.markerMap.set(id, { ...marker, id });
+    // call update once (for multiple synchronous calls)
+    const update = () => {
+      this._update = null;
+      this.updateMarkerCamera(); // should be enough, no need to update whole drawer
+    };
+    this._update = this._update ?? setTimeout(update);
   }
 }
 
@@ -1344,7 +1325,7 @@ class MarkerListView {
     this.mainList = mainList;
     this.options = { ...fallbackListViewOptions, ...options };
     if (typeof this.options.origin === 'string') {
-      const [mapW, mapH] = this.mainList.drawer.config.mapSize;
+      const [mapW, mapH] = this.mainList.drawer.config?.mapSize ?? [0, 0]; // ?? for internal list view
       this.options.origin = parseOrigin(mapW, mapH, this.options.origin);
     }
     this.X =
