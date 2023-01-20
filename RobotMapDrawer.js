@@ -623,6 +623,7 @@ class HoverPopup {
       },
       /* to have more accurate click and down must be the same element */
       panclick: () => {
+        // TODO: check for left button only
         if (!this.states.hovering) {
           return;
         }
@@ -875,6 +876,100 @@ class HoverPopup {
 
 //////////////////////// DISTANT INDICATOR ////////////////////////
 
+function getAttachDetachHandle(root, el, trackingActives, options) {
+  const fallbackOptions = {
+    opacityProperty: '--op',
+    fade: false,
+  };
+  const { opacityProperty, fade } = { ...fallbackOptions, ...options };
+  return {
+    attach() {
+      /* attach with fade in */
+      if (fade) {
+        el.style.setProperty(opacityProperty, `${0}`);
+        // make sure transition is triggered
+        // because transition is not triggered if element not in page
+        const observer = new ResizeObserver((entries) => {
+          el.style.setProperty(opacityProperty, `${1}`);
+          observer.disconnect();
+        });
+        observer.observe(el);
+      }
+      root.appendChild(el);
+      this.active = true;
+      trackingActives?.set(el, this);
+      return this;
+    },
+    detach() {
+      /* detach with fade out */
+      if (fade) {
+        const timer = setTimeout(() => {
+          // fallback remove action
+          console.warn('transitionend is not triggered');
+          el.remove();
+        }, 5000);
+        el.addEventListener('transitionend', (e) => {
+          if (e.propertyName === 'opacity') {
+            el.remove();
+            clearTimeout(timer);
+          }
+        });
+        el.style.setProperty(opacityProperty, `${0}`);
+        if (el.getAnimations().length === 0) {
+          // no transition found
+          // explain: this always occurred when zooming too fast,
+          // where the cover added in previous zoom level and removed in next zoom level
+          el.remove();
+          clearTimeout(timer);
+        }
+      } else {
+        el.remove();
+      }
+      this.active = false;
+      trackingActives?.delete(el);
+      return this;
+    },
+  };
+}
+
+function findUnchangedGroups(prev, curr, itemsFn) {
+  // criteria: both prev and curr have to be list of disjoint sets (by item selector)
+  // original algorithm runs in O(NM), this run in O(N+M)
+  // where N and M are the total items in prev and in curr, respectively
+  const normalize = (gps) => {
+    const x = [...gps].map((gp) => ({ orig: gp, items: itemsFn(gp) }));
+    return new Set(x);
+  };
+  prev = normalize(prev);
+  curr = normalize(curr);
+  const currLookup = new Map();
+  for (const c of curr) {
+    for (const k of c.items) {
+      currLookup.set(k, c);
+    }
+  }
+  const unchanged = [];
+  for (const p of prev) {
+    const [k] = p.items; // first element
+    if (currLookup.has(k)) {
+      const c = currLookup.get(k);
+      if (c.items.length !== p.items.length) {
+        continue;
+      }
+      if (new Set([...c.items, ...p.items]).size === c.items.length) {
+        unchanged.push([p, c]);
+        prev.delete(p);
+        curr.delete(c);
+      }
+    }
+  }
+  return {
+    unchanged: unchanged.map(([p, c]) => [p.orig, c.orig]),
+    detaching: [...prev].map((x) => x.orig),
+    attaching: [...curr].map((x) => x.orig),
+  };
+}
+
 function chevronRight() {
   // hero icons, chevron-right
   // https://heroicons.com/
@@ -889,8 +984,11 @@ function chevronRight() {
 class DistantIndicator {
   constructor(drawer) {
     this.drawer = drawer;
-    this.doms = {};
-    this.cached = {};
+    this.doms = {}; // root
+    this.tracking = {
+      cached: {}, // regions, edges
+      actives: new Map(),
+    };
     this.options = {
       indicatorPadding: 0, // distance between indicator and drawer boundary
     };
@@ -898,70 +996,75 @@ class DistantIndicator {
   getEl() {
     return h`
       <div class="absolute w-full h-full overflow-hidden"></div>
-    `.also((el) => (this.doms.el = el));
-  }
-  getIndicatorDom(region, x, y) {
-    const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
-    // b-black b-1 b-solid bg-black/20
-    const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5 "
-      ${attr((el) => {
-        el.style.setProperty('--x', `${x}px`);
-        el.style.setProperty('--y', `${y}px`);
-        el.style.setProperty('--r', `${rotate * 45}deg`);
-      })} >
-        <div class="-translate-x-1 w-5 h-5">
-          ${chevronRight()}
-        </div>
-      </div>
-    `.el;
-
-    return el;
+    `.also((el) => (this.doms.root = el));
   }
   solveDistant() {
     // indicator is for visible markers and cover
     // so marker included in cover will not be counted
-    const zoomed = this.drawer.zoomedRatioScreenPx;
     const centerPoint = (el) => {
       const r = el.getBoundingClientRect();
       const [x0, y0, w0, h0] = [r.left, r.top, r.width, r.height];
       return [x0 + w0 / 2, y0 + h0 / 2];
     };
-    const data = [
-      ...[...this.drawer.markerList.tracking.actives.entries()].map(
-        ([el, handle]) => {
-          const [x, y] = centerPoint(el);
-          return { handle, x, y };
-        }
-      ),
-    ];
+    const data = [...this.drawer.markerList.tracking.actives.entries()]
+      .map(([el, handle]) => {
+        const [x, y] = centerPoint(el);
+        return { handle, x, y };
+      })
+      .filter((x) => x.handle.hoverable); // because actives include hidden
     const points = data.map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx;
     const r = this.drawer.doms.el.getBoundingClientRect();
     const p = this.options.indicatorPadding;
     const bounding = paddingRect([r.left, r.top, r.width, r.height], p);
     const solved = distantSolver(points, bounding, merging);
-    const mapper = ({ indexes, span }) => ({
-      data: indexes.map((i) => data[i]),
-      span,
-    });
     return {
       regions: solved.regions.map((x) => x.map((i) => data[i])),
-      top: /*    */ solved.top.map(mapper),
-      right: /*  */ solved.right.map(mapper),
-      bottom: /* */ solved.bottom.map(mapper),
-      left: /*   */ solved.left.map(mapper),
+      edges: ['top', 'left', 'right', 'bottom'].flatMap((x) => {
+        return solved[x].map(({ indexes, span }) => ({
+          type: x,
+          data: indexes.map((i) => data[i]),
+          span,
+        }));
+      }),
     };
   }
-  updateIndicatorDomTree() {
-    // TODO
+  getIndicatorDom() {
+    const root = this.doms.root;
+    // b-black b-1 b-solid bg-black/20
+    const el = h`
+      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5">
+        <div class="-translate-x-1 w-5 h-5">
+          ${chevronRight()}
+        </div>
+      </div>
+    `.el;
+    // attached data: active (for hover popup)
+    const handle = {
+      el,
+      get hoverable() {
+        return false; // TODO hover distant indicator
+      },
+      update: (region, x, y) => {
+        const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
+        el.style.setProperty('--x', `${x}px`);
+        el.style.setProperty('--y', `${y}px`);
+        el.style.setProperty('--r', `${rotate * 45}deg`);
+        return handle;
+      },
+      /* attach or detach (no fade in or fade out) */
+      /* fading in or out does not feel right, so not used */
+      ...getAttachDetachHandle(root, el, this.tracking.actives),
+    };
+    return handle;
   }
   updateIndicator() {
-    const solved = this.solveDistant();
-    // quick impl, TODO transition and reusing dom
+    const { regions, edges } = this.solveDistant();
+    const cached = this.tracking.cached;
     // 0  1  2
     // 3  4  5
     // 6  7  8
+    // update dom tree
     const r = this.drawer.doms.el.getBoundingClientRect();
     const p = this.options.indicatorPadding;
     const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
@@ -972,37 +1075,45 @@ class DistantIndicator {
       6: [x0, v0],
       8: [u0, v0],
     };
-    const childs = [];
-    for (const region of [0, 2, 6, 8]) {
-      if (solved.regions[region].length !== 0) {
-        childs.push(this.getIndicatorDom(region, ...corners[region]));
+    for (const i of [0, 2, 6, 8]) {
+      if (regions[i].length !== 0) {
+        regions[i].handle = (
+          cached.regions?.[i].handle ?? this.getIndicatorDom().attach()
+        ).update(i, ...corners[i]);
+      } else {
+        cached.regions?.[i].handle?.detach();
       }
     }
+
+    // edges
+    const { unchanged, detaching, attaching } = findUnchangedGroups(
+      cached.edges ?? [],
+      edges,
+      (ed) => ed.data.map((x) => x.handle.el)
+    );
     const [ox, oy] = [r.left, r.top];
-    // top
-    for (const d of solved.top) {
-      const [c, r] = d.span;
-      childs.push(this.getIndicatorDom(1, c - ox, y0));
+    const types = {
+      top: /*    */ (c) => [1, c - ox, y0],
+      left: /*   */ (c) => [3, x0, c - oy],
+      right: /*  */ (c) => [5, u0, c - oy],
+      bottom: /* */ (c) => [7, c - ox, v0],
+    };
+    const update = (handle, ed) => {
+      const [c, r] = ed.span;
+      return handle.update(...types[ed.type](c));
+    };
+    for (const [p, c] of unchanged) {
+      c.handle = update(p.handle, c);
     }
-    // left
-    for (const d of solved.left) {
-      const [c, r] = d.span;
-      childs.push(this.getIndicatorDom(3, x0, c - oy));
+    for (const p of detaching) {
+      p.handle.detach();
     }
-    // right
-    for (const d of solved.right) {
-      const [c, r] = d.span;
-      childs.push(this.getIndicatorDom(5, u0, c - oy));
-    }
-    // bottom
-    for (const d of solved.bottom) {
-      const [c, r] = d.span;
-      childs.push(this.getIndicatorDom(7, c - ox, v0));
+    for (const c of attaching) {
+      c.handle = update(this.getIndicatorDom(), c).attach();
     }
 
-    const root = this.doms.el;
-    root.innerHTML = '';
-    root.append(...childs);
+    cached.regions = regions;
+    cached.edges = edges;
 
     // check do update next frame if there is transition
     if (this.drawer.doms.camera.getAnimations({ subtree: true }).length > 0) {
@@ -1012,6 +1123,62 @@ class DistantIndicator {
       };
       this._update = this._update ?? requestAnimationFrame(update);
     }
+    return;
+    // // const solved = this.solveDistant();
+    // // quick impl, TODO transition and reusing dom
+    // // 0  1  2
+    // // 3  4  5
+    // // 6  7  8
+    // const r = this.drawer.doms.el.getBoundingClientRect();
+    // const p = this.options.indicatorPadding;
+    // const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
+    // const [u0, v0] = [x0 + w0, y0 + h0];
+    // const corners = {
+    //   0: [x0, y0],
+    //   2: [u0, y0],
+    //   6: [x0, v0],
+    //   8: [u0, v0],
+    // };
+    // const childs = [];
+    // for (const region of [0, 2, 6, 8]) {
+    //   if (solved.regions[region].length !== 0) {
+    //     childs.push(this.getIndicatorDom(region, ...corners[region]));
+    //   }
+    // }
+    // const [ox, oy] = [r.left, r.top];
+    // // top
+    // for (const d of solved.top) {
+    //   const [c, r] = d.span;
+    //   childs.push(this.getIndicatorDom(1, c - ox, y0));
+    // }
+    // // left
+    // for (const d of solved.left) {
+    //   const [c, r] = d.span;
+    //   childs.push(this.getIndicatorDom(3, x0, c - oy));
+    // }
+    // // right
+    // for (const d of solved.right) {
+    //   const [c, r] = d.span;
+    //   childs.push(this.getIndicatorDom(5, u0, c - oy));
+    // }
+    // // bottom
+    // for (const d of solved.bottom) {
+    //   const [c, r] = d.span;
+    //   childs.push(this.getIndicatorDom(7, c - ox, v0));
+    // }
+
+    // const root = this.doms.root;
+    // root.innerHTML = '';
+    // root.append(...childs);
+
+    // // check do update next frame if there is transition
+    // if (this.drawer.doms.camera.getAnimations({ subtree: true }).length > 0) {
+    //   const update = () => {
+    //     this._update = null;
+    //     this.updateIndicator();
+    //   };
+    //   this._update = this._update ?? requestAnimationFrame(update);
+    // }
   }
 }
 
@@ -1047,7 +1214,7 @@ class MarkerList {
     this.tracking = {
       markerHandle: new Map(), // key: id, value: marker dom handle
       cached: {}, // remains, covers
-      actives: new Map(), // key el, value: marker or cover dom handle
+      actives: new Map(), // key el, value: marker or cover dom handle, for hover popup
     };
     this.nextId = 0; // auto id if id is not given
     this.markerMap = new Map(); // id => { id, name, x, y, color }
