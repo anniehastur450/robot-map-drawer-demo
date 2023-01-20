@@ -117,7 +117,7 @@ class RobotMapDrawer {
       zoom: 100,
       offset: [0, 0], // [x, y] in meters
     };
-    this.doms = {};
+    this.doms = {}; // el, camera, zoom, zoomInput, scaleBar, scaleText
     this.ratios = {};
     this.viewAnimations = null;
     this.eventHooks = createHooks(); // for hover popup to use only
@@ -922,26 +922,24 @@ class DistantIndicator {
     // indicator is for visible markers and cover
     // so marker included in cover will not be counted
     const zoomed = this.drawer.zoomedRatioScreenPx;
+    const centerPoint = (el) => {
+      const r = el.getBoundingClientRect();
+      const [x0, y0, w0, h0] = [r.left, r.top, r.width, r.height];
+      return [x0 + w0 / 2, y0 + h0 / 2];
+    };
     const data = [
-      ...this.drawer.markerList.tracking.cached.remains.map((id) => {
-        const { x, y } = this.drawer.markerList.markerMap.get(id);
-        return { type: 'marker', id, x, y };
-      }),
-      ...this.drawer.markerList.tracking.cached.covers.map((cover) => {
-        const [x, y, r] = cover.circle;
-        return { type: 'cover', cover, x, y };
-      }),
+      ...[...this.drawer.markerList.tracking.actives.entries()].map(
+        ([el, handle]) => {
+          const [x, y] = centerPoint(el);
+          return { handle, x, y };
+        }
+      ),
     ];
     const points = data.map(({ x, y }) => [x, y]);
-    const merging = this.drawer.config.mergingPx / zoomed;
-    const bounding = (() => {
-      const [x0, y0, w0, h0] = this.getIndicatorBounding();
-      const [ox, oy] = this.drawer.camera.offset;
-      const vw = w0 / zoomed;
-      const vh = h0 / zoomed;
-      const [x, y] = [-ox - vw / 2, -oy - vh / 2];
-      return [x, y, vw, vh];
-    })();
+    const merging = this.drawer.config.mergingPx;
+    const r = this.drawer.doms.el.getBoundingClientRect();
+    const p = this.options.indicatorPadding;
+    const bounding = paddingRect([r.left, r.top, r.width, r.height], p);
     const solved = distantSolver(points, bounding, merging);
     const mapper = ({ indexes, span }) => ({
       data: indexes.map((i) => data[i]),
@@ -955,11 +953,8 @@ class DistantIndicator {
       left: /*   */ solved.left.map(mapper),
     };
   }
-  getIndicatorBounding() {
-    const r = this.drawer.doms.el.getBoundingClientRect();
-    const p = this.options.indicatorPadding;
-    const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
-    return [x0, y0, w0, h0];
+  updateIndicatorDomTree() {
+    // TODO
   }
   updateIndicator() {
     const solved = this.solveDistant();
@@ -967,7 +962,9 @@ class DistantIndicator {
     // 0  1  2
     // 3  4  5
     // 6  7  8
-    const [x0, y0, w0, h0] = this.getIndicatorBounding();
+    const r = this.drawer.doms.el.getBoundingClientRect();
+    const p = this.options.indicatorPadding;
+    const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
     const [u0, v0] = [x0 + w0, y0 + h0];
     const corners = {
       0: [x0, y0],
@@ -981,39 +978,40 @@ class DistantIndicator {
         childs.push(this.getIndicatorDom(region, ...corners[region]));
       }
     }
-    const zoomed = this.drawer.zoomedRatioScreenPx;
-    const [ox, oy] = this.drawer.camera.offset;
-    const rect = this.drawer.doms.el.getBoundingClientRect();
-    const cx = rect.width / 2 + ox * zoomed;
-    const cy = rect.height / 2 + oy * zoomed;
+    const [ox, oy] = [r.left, r.top];
     // top
     for (const d of solved.top) {
       const [c, r] = d.span;
-      const dx = cx + c * zoomed;
-      childs.push(this.getIndicatorDom(1, dx, y0));
+      childs.push(this.getIndicatorDom(1, c - ox, y0));
     }
     // left
     for (const d of solved.left) {
       const [c, r] = d.span;
-      const dy = cy + c * zoomed;
-      childs.push(this.getIndicatorDom(3, x0, dy));
+      childs.push(this.getIndicatorDom(3, x0, c - oy));
     }
     // right
     for (const d of solved.right) {
       const [c, r] = d.span;
-      const dy = cy + c * zoomed;
-      childs.push(this.getIndicatorDom(5, u0, dy));
+      childs.push(this.getIndicatorDom(5, u0, c - oy));
     }
     // bottom
     for (const d of solved.bottom) {
       const [c, r] = d.span;
-      const dx = cx + c * zoomed;
-      childs.push(this.getIndicatorDom(7, dx, v0));
+      childs.push(this.getIndicatorDom(7, c - ox, v0));
     }
 
     const root = this.doms.el;
     root.innerHTML = '';
     root.append(...childs);
+
+    // check do update next frame if there is transition
+    if (this.drawer.doms.camera.getAnimations({ subtree: true }).length > 0) {
+      const update = () => {
+        this._update = null;
+        this.updateIndicator();
+      };
+      this._update = this._update ?? requestAnimationFrame(update);
+    }
   }
 }
 
@@ -1194,8 +1192,6 @@ class MarkerList {
       },
       /* detach with fade out */
       detach: () => {
-        el.style.setProperty('--op', `${0}`);
-        // TODO use getAnimations to check if there is transition
         const timer = setTimeout(() => {
           // fallback remove action
           console.warn('transitionend is not triggered');
@@ -1207,6 +1203,14 @@ class MarkerList {
             clearTimeout(timer);
           }
         });
+        el.style.setProperty('--op', `${0}`);
+        if (el.getAnimations().length === 0) {
+          // no transition found
+          // explain: this always occurred when zooming too fast,
+          // where the cover added in previous zoom level and removed in next zoom level
+          el.remove();
+          clearTimeout(timer);
+        }
         handle.active = false;
         this.tracking.actives.delete(el);
         return handle;
