@@ -119,7 +119,9 @@ class RobotMapDrawer {
       zoom: 100,
       offset: [0, 0], // [x, y] in meters
     };
-    this.doms = {}; // (no root), camera, map, zoom, zoomInput, scaleBar, scaleText
+    this.doms = {
+      ui: [], // for distant indicator to not being covered by ui
+    }; // (no root), camera, map, zoom, zoomInput, scaleBar, scaleText
     this.ratios = {};
     this.viewAnimations = null;
     this.eventHooks = createHooks(); // for hover popup to use only
@@ -968,8 +970,15 @@ function findUnchangedGroups(prev, curr, itemsFn) {
 
 function chevronRight() {
   // source: https://www.svgviewer.dev/s/16996/chevron-right
+  // TODO better shadow effect
+  // drop shadow filter: https://stackoverflow.com/questions/6088409/svg-drop-shadow-using-css3
   return h`
-    <svg width="24px" height="24px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right"><polyline points="9 18 15 12 9 6"></polyline></svg>
+    <svg width="24px" height="24px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right">
+      <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="0" stdDeviation="0.3" flood-color="#fff" flood-opacity="0.4" />
+      </filter>
+      <polyline points="9 18 15 12 9 6" filter="url(#shadow)"></polyline>
+    </svg>
   `;
 }
 
@@ -1027,7 +1036,7 @@ class DistantIndicator {
     const root = this.doms.root;
     // outline outline-black outline-1 bg-black/20
     const el = h`
-      <div class="absolute w-0 h-0 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-700/70 flex justify-center items-center">
+      <div class="absolute w-0 h-0 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-800/80 flex justify-center items-center">
         <div class="translate-x-[-4px] w-[24px] h-[24px]">
           ${chevronRight()}
         </div>
