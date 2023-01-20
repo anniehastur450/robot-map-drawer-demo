@@ -5,7 +5,6 @@ const fallbackConfig = {
   mapImgUrl: null, //  required
   mapSize: null, // required, [w, h]
   bgColor: '#222',
-  // resize: false,
   unit: 'm',
   // units: {
   //   km: [1000, 'm'],
@@ -13,17 +12,17 @@ const fallbackConfig = {
   //   cm: [10, 'mm'],
   // }, // TODO: support unit conversion
   scaleBarPx: 100, // scale bar size is arround this value
-  zooms: [
-    5, 10, 15, /*
+  zoomLevels: [
+    1, 2, 5, 10, 15, /*
      */ 25, 33, 50, 67, 75, 80, 90, 100, 110, /*
      */ 125, 150, 175, 200, 250, 300, 400, 500, /*
-     */ 750, 1000, 1500, 2000,
+     */ 750, 1000, 1500, 2000, 3000, 4000, 5000,
   ],
   /* inertia dragging related */
-
+  brakingTimeMs: 750,
   /* merging related */
   mergingPx: 32,
-  markerSizePx: 16, // size for merge cover to cover
+  // markerSizePx: 16, // size for merge cover to cover // not used
   coverMethod: 'simple', // 'simple', 'smallest', 'mean' or 'median'
   /* hover popup related */
   hoverPopupDelayMs: 750,
@@ -50,8 +49,8 @@ function calculateVelocity(trails, ms) {
       break;
     }
   }
-  // this is a upper cap for speed (min dt 1 ms),
-  // and also avoid the situation when dt = 0
+  // this is the minimum time frame could be (1 ms),
+  // avoid the situation when dt = 0
   dt = Math.max(1, dt);
   return {
     dt,
@@ -70,26 +69,6 @@ function clamp(value, min, max) {
 function invalidAction(x) {
   throw new Error(`invalid action: ${x}`);
 }
-
-// TODO use it
-// function comparePrevious(previous, next) {
-//   const changes = {};
-//   for (const [k, v] of Object.entries(next)) {
-//     changes[k] = this.previous[k] !== v;
-//   }
-//   changes.any = (...keys) => {
-//     if (keys.length === 0) keys = next.keys();
-//     return keys.some((k) => changes[k]);
-//   };
-//   return {
-//     changes,
-//     updatePrevious: () => {
-//       for (const [k, v] of Object.entries(next)) {
-//         this.previous[k] = v;
-//       }
-//     },
-//   };
-// }
 
 function createHooks() {
   return {
@@ -145,7 +124,7 @@ class RobotMapDrawer {
     this.setZoom(100);
   }
   findZoomLevel(zoom) {
-    const zooms = this.config.zooms;
+    const zooms = this.config.zoomLevels;
     const prev = zooms.findLast((x) => x < zoom) ?? zooms[0];
     const next = zooms.find((x) => x > zoom) ?? zooms[zooms.length - 1];
     return {
@@ -242,7 +221,7 @@ class RobotMapDrawer {
     const request = (x) => requestAnimationFrame(x);
     const cancel = (x) => cancelAnimationFrame(x);
     this.viewAnimations?.stop();
-    const brakingTime = 750; // ms
+    const brakingTime = this.config.brakingTimeMs; // ms
     let [sx, sy] = [Math.sign(velocityX), Math.sign(velocityY)];
     let [vx, vy] = [Math.abs(velocityX), Math.abs(velocityY)];
     let [ax, ay] = [-vx / brakingTime, -vy / brakingTime];
@@ -278,7 +257,7 @@ class RobotMapDrawer {
   trySetZoom(zoomString) {
     let zoom = parseFloat(zoomString);
     if (!isNaN(zoom) && zoom) {
-      const zooms = this.config.zooms;
+      const zooms = this.config.zoomLevels;
       const min = zooms[0];
       const max = zooms[zooms.length - 1];
       zoom = clamp(zoom, min, max);
@@ -308,17 +287,17 @@ class RobotMapDrawer {
             })} >
               100%
             </button>
-            <input value="100%" class="w-[var(--zoom-w)] btn h-6 bg-white text-gray-500 absolute right-0 text-center"
+            <input value="100%" class="btn absolute right-0 w-[var(--input-w)] h-6 bg-white text-gray-500 text-center"
             ${attr((el) => {
               this.doms.zoomInput = el;
               const observer = new MutationObserver(() => {
                 if (el.disabled) {
                   el.classList.add('invisible');
-                  el.style.setProperty('--zoom-w', '0');
+                  el.style.setProperty('--input-w', '0');
                 } else {
                   const rect = this.doms.zoom.getBoundingClientRect();
                   el.classList.remove('invisible');
-                  el.style.setProperty('--zoom-w', `${rect.width}px`);
+                  el.style.setProperty('--input-w', `${rect.width}px`);
                   el.value = this.doms.zoom.textContent;
                   el.focus();
                   el.select();
@@ -330,25 +309,23 @@ class RobotMapDrawer {
               el.disabled = true;
             })}
             ${events({
-              blur: () => {
-                if (!this.doms.zoomInput.disabled) {
-                  this.trySetZoom(this.doms.zoomInput.value);
+              blur: (e) => {
+                if (!e.target.disabled) {
+                  this.trySetZoom(e.target.value);
                 }
               },
               keydown: (e) => {
                 if (e.key === 'Enter') {
-                  this.trySetZoom(this.doms.zoomInput.value);
+                  this.trySetZoom(e.target.value);
                 }
                 if (e.key === 'Escape') {
                   this.setZoom(this.camera.zoom); // reset zoom text
                 }
               },
-              input: () => {
-                const el = this.doms.zoom;
-                const zoomInput = this.doms.zoomInput;
-                el.textContent = zoomInput.value;
-                const rect = el.getBoundingClientRect();
-                zoomInput.style.setProperty('--zoom-w', `${rect.width}px`);
+              input: (e) => {
+                this.doms.zoom.textContent = e.target.value;
+                const rect = this.doms.zoom.getBoundingClientRect();
+                e.target.style.setProperty('--input-w', `${rect.width}px`);
               },
             })} >
           </div>
@@ -358,7 +335,7 @@ class RobotMapDrawer {
             ${events({ click: () => this.zoomIn() })} >
               <i class="fas fa-plus"></i>
             </button>
-            <button title="zoom out" class="btn b-t b-t-solid b-t-gray-200 w-6 h-6 bg-white hover:text-gray-500 flex justify-center items-center"
+            <button title="zoom out" class="btn b-t b-t-solid b-t-gray-200 box-content w-6 h-6 bg-white hover:text-gray-500 flex justify-center items-center"
             ${events({ click: () => this.zoomOut() })} >
               <i class="fas fa-minus"></i>
             </button>
@@ -385,6 +362,7 @@ class RobotMapDrawer {
                 }
                 dragging = true;
                 e.target.classList.add('cursor-move');
+                console.log(e.target);
                 this.eventHooks.panstart?.();
               }
               this.camera.offset[0] -= (x - prevX) / this.zoomedRatioScreenPx;
@@ -405,6 +383,7 @@ class RobotMapDrawer {
                 this.eventHooks.panclick?.();
               }
               e.target.classList.remove('cursor-move');
+              console.log(e.target);
               window.removeEventListener('mousemove', mousemove);
               window.removeEventListener('mouseup', mouseup);
             };
@@ -453,7 +432,7 @@ class RobotMapDrawer {
         ${this.markerList.distants.getEl()}
 
         <!-- scale bar -->
-        <div class="absolute bg-white/50 text-black/90 px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none"
+        <div class="absolute bg-white/70 text-black/90 rounded px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none"
         ${attr((el) => this.doms.ui.push({ el, region: 8 }))} >
           <div class="flex items-center">
             <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black/90 b-t-none"
@@ -478,6 +457,8 @@ class RobotMapDrawer {
 
   markerList = new MarkerList(this);
   hoverPopup = new HoverPopup(this);
+
+  getCameraProjection() {}
 }
 
 //////////////////////// HOVER POPUP ////////////////////////
@@ -1049,7 +1030,7 @@ class DistantIndicator {
       <div class="absolute w-[16px] h-[14px] -translate-1/2 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-700/80 flex justify-center items-center opacity-[var(--op,1)]">
         <div class="absolute -translate-x-1/2 w-full h-[2px]"
         ${attr((el) => (colliBox = el))} ></div>
-        ${(region % 2 === 0
+        ${(region % 2 !== 0
           ? h`<div class="absolute -translate-x-1/2 w-1/2 h-full"></div>`
           : h`<div style="clip-path: polygon(100% 100%, 0 0, 100% 0);"
               class="absolute translate-x-[-8px] w-[8px] h-[8px] scale-[1.5] rotate-45"></div>`
