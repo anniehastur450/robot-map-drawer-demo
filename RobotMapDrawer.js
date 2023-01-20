@@ -1032,14 +1032,11 @@ class DistantIndicator {
     const solved = distantSolver(points, bounding, merging);
     return {
       regions: solved.regions.map((x) => x.map((i) => data[i])),
-      edges: ['top', 'left', 'right', 'bottom'].flatMap((x) => {
-        return solved[x].map(({ region, indexes, span }) => ({
-          type: x,
-          region,
-          data: indexes.map((i) => data[i]),
-          span,
-        }));
-      }),
+      edges: solved.edges.map(({ region, indexes, span }) => ({
+        region,
+        data: indexes.map((i) => data[i]),
+        span,
+      })),
     };
   }
   getIndicatorDom(region) {
@@ -1074,7 +1071,7 @@ class DistantIndicator {
       setHovering(hovering) {
         el.style.setProperty('--op', hovering ? '1' : '0.8');
       },
-      update: (rx, ry) => {
+      update: ([rx, ry]) => {
         el.style.setProperty('--x', `${rx}px`);
         el.style.setProperty('--y', `${ry}px`);
         // detect intersection with drawer ui, if being covered, try to move to a better location
@@ -1186,7 +1183,7 @@ class DistantIndicator {
       if (regions[i].length !== 0) {
         regions[i].handle = (
           cached.regions?.[i].handle ?? this.getIndicatorDom(i).attach()
-        ).update(...corners[i]);
+        ).update(corners[i]);
       } else {
         cached.regions?.[i].handle?.detach();
       }
@@ -1200,14 +1197,14 @@ class DistantIndicator {
     );
     const [ox, oy] = [r.left, r.top];
     const types = {
-      top: /*    */ (c) => [c - ox, y0],
-      left: /*   */ (c) => [x0, c - oy],
-      right: /*  */ (c) => [u0, c - oy],
-      bottom: /* */ (c) => [c - ox, v0],
+      1: (c) => [c - ox, y0],
+      3: (c) => [x0, c - oy],
+      5: (c) => [u0, c - oy],
+      7: (c) => [c - ox, v0],
     };
     const update = (handle, ed) => {
       const [c, r] = ed.span;
-      return handle.update(...types[ed.type](c));
+      return handle.update(types[ed.region](c));
     };
     for (const [p, c] of unchanged) {
       c.handle = update(p.handle, c);
