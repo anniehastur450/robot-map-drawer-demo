@@ -115,6 +115,7 @@ class RobotMapDrawer {
   constructor(config) {
     this.config = { ...fallbackConfig, ...config };
     this.camera = {
+      /* how the camera move? the camera first focus to the offset point of the map, then zoom */
       zoom: 100,
       offset: [0, 0], // [x, y] in meters
     };
@@ -159,8 +160,8 @@ class RobotMapDrawer {
     if (cursor) {
       const curr = this.camera.zoom;
       const [cx, cy] = cursor;
-      dx = -(cx / this.zoomedRatioScreenPx) * (1 - curr / next);
-      dy = -(cy / this.zoomedRatioScreenPx) * (1 - curr / next);
+      dx = (cx / this.zoomedRatioScreenPx) * (1 - curr / next);
+      dy = (cy / this.zoomedRatioScreenPx) * (1 - curr / next);
     }
     this.camera.offset[0] += dx;
     this.camera.offset[1] += dy;
@@ -209,8 +210,8 @@ class RobotMapDrawer {
         x.finish();
       }
     });
-    el.style.setProperty('--x', `${(x / mapW) * this.camera.zoom}%`);
-    el.style.setProperty('--y', `${(y / mapH) * this.camera.zoom}%`);
+    el.style.setProperty('--x', `${(-x / mapW) * this.camera.zoom}%`);
+    el.style.setProperty('--y', `${(-y / mapH) * this.camera.zoom}%`);
     el.style.setProperty('--s', `${this.camera.zoom / 100}`);
     this.doms.zoom.textContent = `${this.camera.zoom}%`;
     this.updateScaleBar();
@@ -249,8 +250,8 @@ class RobotMapDrawer {
       vx = Math.max(0, vx + ax * dt);
       vy = Math.max(0, vy + ay * dt);
       let [x, y] = this.camera.offset;
-      x += (vx * sx * dt) / this.zoomedRatioScreenPx;
-      y += (vy * sy * dt) / this.zoomedRatioScreenPx;
+      x -= (vx * sx * dt) / this.zoomedRatioScreenPx;
+      y -= (vy * sy * dt) / this.zoomedRatioScreenPx;
       this.camera.offset = [x, y];
       this.updateCamera();
       let v = Math.hypot(vx, vy);
@@ -382,8 +383,8 @@ class RobotMapDrawer {
                 e.target.classList.add('cursor-move');
                 this.eventHooks.panstart?.();
               }
-              this.camera.offset[0] += (x - prevX) / this.zoomedRatioScreenPx;
-              this.camera.offset[1] += (y - prevY) / this.zoomedRatioScreenPx;
+              this.camera.offset[0] -= (x - prevX) / this.zoomedRatioScreenPx;
+              this.camera.offset[1] -= (y - prevY) / this.zoomedRatioScreenPx;
               this.updateCamera();
               [prevX, prevY] = [x, y];
               trails.push([prevX, prevY, performance.now()]);
@@ -1171,7 +1172,7 @@ class MarkerList {
     //TODO refactor
     // focus to this marker
     const { x, y } = this.markerMap.get(id);
-    this.drawer.camera.offset = [-x, -y];
+    this.drawer.camera.offset = [x, y];
     this.drawer.setZoom(this.drawer.config.focusingZoom);
   }
   focusCover(cover) {
@@ -1182,7 +1183,7 @@ class MarkerList {
     const [W, H] = [rect.width, rect.height];
     const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
     const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
-    this.drawer.camera.offset = [-x, -y];
+    this.drawer.camera.offset = [x, y];
     this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
   }
   getEl() {
