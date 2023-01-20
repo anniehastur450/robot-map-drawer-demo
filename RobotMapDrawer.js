@@ -109,6 +109,7 @@ function createHooks() {
 }
 
 // to fix: animation is aborted when drawer size change
+// FIX!!!! getBoundingClientRect of drawer includes its border!! so every things is slightly wrong!
 
 class RobotMapDrawer {
   constructor(config) {
@@ -971,12 +972,9 @@ function findUnchangedGroups(prev, curr, itemsFn) {
 }
 
 function chevronRight() {
-  // hero icons, chevron-right
-  // https://heroicons.com/
+  // source: https://www.svgviewer.dev/s/16996/chevron-right
   return h`
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5">
-      <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
-    </svg>
+    <svg width="24px" height="24px" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="feather feather-chevron-right"><polyline points="9 18 15 12 9 6"></polyline></svg>
   `;
 }
 
@@ -1031,10 +1029,10 @@ class DistantIndicator {
   }
   getIndicatorDom() {
     const root = this.doms.root;
-    // b-black b-1 b-solid bg-black/20
+    // outline outline-black outline-1 bg-black/20
     const el = h`
-      <div class="absolute left-[var(--x)] top-[var(--y)] rotate-[var(--r)] -translate-1/2 scale-[2.5] text-slate-700/70 w-5 h-5">
-        <div class="-translate-x-1 w-5 h-5">
+      <div class="absolute w-0 h-0 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-700/70 flex justify-center items-center">
+        <div class="translate-x-[-4px] w-[24px] h-[24px]">
           ${chevronRight()}
         </div>
       </div>
