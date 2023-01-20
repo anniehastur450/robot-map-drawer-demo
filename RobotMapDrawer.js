@@ -731,14 +731,7 @@ class HoverPopup {
     })();
     const handle = {
       el,
-      attach: () => {
-        root.appendChild(el);
-        return handle;
-      },
-      detach: () => {
-        el.remove();
-        return handle;
-      },
+      ...handleAttachor(root, el),
     };
     return handle;
   }
@@ -880,7 +873,7 @@ class HoverPopup {
 
 //////////////////////// DISTANT INDICATOR ////////////////////////
 
-function getAttachDetachHandle(root, el, trackingActives, options) {
+function handleAttachor(root, el, trackingActives, options) {
   const fallbackOptions = {
     opacityProperty: '--op',
     fade: false,
@@ -941,7 +934,7 @@ function findUnchangedGroups(prev, curr, itemsFn) {
   // original algorithm runs in O(NM), this run in O(N+M)
   // where N and M are the total items in prev and in curr, respectively
   const normalize = (gps) => {
-    const x = [...gps].map((gp) => ({ orig: gp, items: itemsFn(gp) }));
+    const x = [...gps].map((gp) => ({ orig: gp, items: new Set(itemsFn(gp)) }));
     return new Set(x);
   };
   prev = normalize(prev);
@@ -957,10 +950,10 @@ function findUnchangedGroups(prev, curr, itemsFn) {
     const [k] = p.items; // first element
     if (currLookup.has(k)) {
       const c = currLookup.get(k);
-      if (c.items.length !== p.items.length) {
+      if (c.items.size !== p.items.size) {
         continue;
       }
-      if (new Set([...c.items, ...p.items]).size === c.items.length) {
+      if (new Set([...c.items, ...p.items]).size === c.items.size) {
         unchanged.push([p, c]);
         prev.delete(p);
         curr.delete(c);
@@ -1055,7 +1048,7 @@ class DistantIndicator {
       },
       /* attach or detach (no fade in or fade out) */
       /* fading in or out does not feel right, so not used */
-      ...getAttachDetachHandle(root, el, this.tracking.actives),
+      ...handleAttachor(root, el, this.tracking.actives),
     };
     return handle;
   }
@@ -1124,62 +1117,6 @@ class DistantIndicator {
       };
       this._update = this._update ?? requestAnimationFrame(update);
     }
-    return;
-    // // const solved = this.solveDistant();
-    // // quick impl, TODO transition and reusing dom
-    // // 0  1  2
-    // // 3  4  5
-    // // 6  7  8
-    // const r = this.drawer.doms.camera.getBoundingClientRect();
-    // const p = this.options.indicatorPadding;
-    // const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
-    // const [u0, v0] = [x0 + w0, y0 + h0];
-    // const corners = {
-    //   0: [x0, y0],
-    //   2: [u0, y0],
-    //   6: [x0, v0],
-    //   8: [u0, v0],
-    // };
-    // const childs = [];
-    // for (const region of [0, 2, 6, 8]) {
-    //   if (solved.regions[region].length !== 0) {
-    //     childs.push(this.getIndicatorDom(region, ...corners[region]));
-    //   }
-    // }
-    // const [ox, oy] = [r.left, r.top];
-    // // top
-    // for (const d of solved.top) {
-    //   const [c, r] = d.span;
-    //   childs.push(this.getIndicatorDom(1, c - ox, y0));
-    // }
-    // // left
-    // for (const d of solved.left) {
-    //   const [c, r] = d.span;
-    //   childs.push(this.getIndicatorDom(3, x0, c - oy));
-    // }
-    // // right
-    // for (const d of solved.right) {
-    //   const [c, r] = d.span;
-    //   childs.push(this.getIndicatorDom(5, u0, c - oy));
-    // }
-    // // bottom
-    // for (const d of solved.bottom) {
-    //   const [c, r] = d.span;
-    //   childs.push(this.getIndicatorDom(7, c - ox, v0));
-    // }
-
-    // const root = this.doms.root;
-    // root.innerHTML = '';
-    // root.append(...childs);
-
-    // // check do update next frame if there is transition
-    // if (this.drawer.doms.camera.getAnimations({ subtree: true }).length > 0) {
-    //   const update = () => {
-    //     this._update = null;
-    //     this.updateIndicator();
-    //   };
-    //   this._update = this._update ?? requestAnimationFrame(update);
-    // }
   }
 }
 
@@ -1303,18 +1240,7 @@ class MarkerList {
         handle.hidden = opacity == 0;
         return handle;
       },
-      attach: () => {
-        root.appendChild(el);
-        handle.active = true;
-        this.tracking.actives.set(el, handle);
-        return handle;
-      },
-      detach: () => {
-        el.remove();
-        handle.active = false;
-        this.tracking.actives.delete(el);
-        return handle;
-      },
+      ...handleAttachor(root, el, this.tracking.actives),
     };
     this.drawer.attachedData.set(el, handle);
     return handle;
@@ -1343,46 +1269,8 @@ class MarkerList {
         handle.cover = cover;
         return handle;
       },
-      /* attach with fade in */
-      attach: () => {
-        el.style.setProperty('--op', `${0}`);
-        root.appendChild(el);
-        // make sure transition is triggered
-        // because transition is not triggered if element not in page
-        const observer = new ResizeObserver((entries) => {
-          el.style.setProperty('--op', `${1}`);
-          observer.disconnect();
-        });
-        observer.observe(el);
-        handle.active = true;
-        this.tracking.actives.set(el, handle);
-        return handle;
-      },
-      /* detach with fade out */
-      detach: () => {
-        const timer = setTimeout(() => {
-          // fallback remove action
-          console.warn('transitionend is not triggered');
-          el.remove();
-        }, 5000);
-        el.addEventListener('transitionend', (e) => {
-          if (e.propertyName === 'opacity') {
-            el.remove();
-            clearTimeout(timer);
-          }
-        });
-        el.style.setProperty('--op', `${0}`);
-        if (el.getAnimations().length === 0) {
-          // no transition found
-          // explain: this always occurred when zooming too fast,
-          // where the cover added in previous zoom level and removed in next zoom level
-          el.remove();
-          clearTimeout(timer);
-        }
-        handle.active = false;
-        this.tracking.actives.delete(el);
-        return handle;
-      },
+      /* attach or detach with fade in or fade out */
+      ...handleAttachor(root, el, this.tracking.actives, { fade: true }),
     };
     this.drawer.attachedData.set(el, handle);
     return handle;
@@ -1405,24 +1293,27 @@ class MarkerList {
     }
   }
   findUnchangedCovers(prevCovers, covers) {
-    // unchange if both ids is equals ignore order
-    const unchanged = [];
-    const detaching = new Set(prevCovers); // prevCovers can be null
-    const attaching = new Set(covers);
-    for (const p of [...detaching]) {
-      for (const c of attaching) {
-        if (p.ids.length !== c.ids.length) {
-          continue;
-        }
-        if (new Set([...p.ids, ...c.ids]).size === p.ids.length) {
-          unchanged.push([p, c]);
-          detaching.delete(p);
-          attaching.delete(c);
-          break;
-        }
-      }
-    }
-    return { unchanged, detaching, attaching };
+    /* original algorithm: */
+    // // unchange if both ids is equals ignore order
+    // const unchanged = [];
+    // const detaching = new Set(prevCovers); // prevCovers can be null
+    // const attaching = new Set(covers);
+    // for (const p of [...detaching]) {
+    //   for (const c of attaching) {
+    //     if (p.ids.length !== c.ids.length) {
+    //       continue;
+    //     }
+    //     if (new Set([...p.ids, ...c.ids]).size === p.ids.length) {
+    //       unchanged.push([p, c]);
+    //       detaching.delete(p);
+    //       attaching.delete(c);
+    //       break;
+    //     }
+    //   }
+    // }
+    // return { unchanged, detaching, attaching };
+    /* using general algorithm */
+    return findUnchangedGroups(prevCovers ?? [], covers, (c) => c.ids);
   }
   updateMarkerCamera() {
     this.updateMarkerDomTree();
