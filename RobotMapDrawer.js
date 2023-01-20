@@ -287,7 +287,7 @@ class RobotMapDrawer {
   }
   attach(target) {
     h`
-      <div class="w-full h-full b-50 b-solid b-gray-200 relative font-sans">
+      <div class="w-full h-full relative font-sans">
 
         <!-- zoom buttons -->
         <div class="absolute top-1 left-1 text-gray">
@@ -429,7 +429,7 @@ class RobotMapDrawer {
         <!-- camera and view -->
         <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden select-none"
         ${attr((el) => {
-          this.doms.camera = el
+          this.doms.camera = el;
           el.style.setProperty('--bg', this.config.bgColor);
         })} >
           <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative">
