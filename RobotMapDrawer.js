@@ -118,7 +118,7 @@ class RobotMapDrawer {
       zoom: 100,
       offset: [0, 0], // [x, y] in meters
     };
-    this.doms = {}; // el, camera, zoom, zoomInput, scaleBar, scaleText
+    this.doms = {}; // (no root), camera, map, zoom, zoomInput, scaleBar, scaleText
     this.ratios = {};
     this.viewAnimations = null;
     this.eventHooks = createHooks(); // for hover popup to use only
@@ -180,10 +180,12 @@ class RobotMapDrawer {
     return (this.ratios.screenPxByMapUnit * this.camera.zoom) / 100;
   }
   registerEl(el) {
-    this.doms.el = el;
+    // this.doms.el = el; // TODO remove this line
     const [mapW, mapH] = this.config.mapSize;
     const resizeObserver = new ResizeObserver((entries) => {
-      const rect = el.getBoundingClientRect(); // clientWidth x clientHeight but with floating point
+      // getBoundingClientRect includes the border!! get it via el is slightly wrong!!
+      // get it via camera instead!!
+      const rect = this.doms.camera.getBoundingClientRect(); // clientWidth x clientHeight but with floating point
       const [w, h] = [rect.width, rect.height];
       const aspectW = Math.min(w, (h / mapH) * mapW);
       const aspectH = (aspectW / mapW) * mapH;
@@ -200,7 +202,7 @@ class RobotMapDrawer {
     if (!this.ratios.screenPxByMapUnit /* 0 is also invalid */) {
       return;
     }
-    const el = this.doms.camera;
+    const el = this.doms.map;
     const [mapW, mapH] = this.config.mapSize;
     const [x, y] = this.camera.offset;
     el.getAnimations({ subtree: true }).forEach((x) => {
@@ -285,7 +287,7 @@ class RobotMapDrawer {
   }
   attach(target) {
     h`
-      <div class="w-full h-full b b-solid b-gray-200 relative font-sans">
+      <div class="w-full h-full b-50 b-solid b-gray-200 relative font-sans">
 
         <!-- zoom buttons -->
         <div class="absolute top-1 left-1 text-gray">
@@ -426,10 +428,13 @@ class RobotMapDrawer {
 
         <!-- camera and view -->
         <div class="absolute w-full h-full bg-[var(--bg)] flex justify-center items-center overflow-hidden select-none"
-        ${attr((el) => el.style.setProperty('--bg', this.config.bgColor))} >
+        ${attr((el) => {
+          this.doms.camera = el
+          el.style.setProperty('--bg', this.config.bgColor);
+        })} >
           <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative">
             <div class="absolute w-full h-full transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
-            ${attr((el) => (this.doms.camera = el))} >
+            ${attr((el) => (this.doms.map = el))} >
               <img width="0" height="0" class="absolute w-full h-full"
               ${attr((el) => (el.src = this.config.mapImgUrl))} >
 
@@ -468,8 +473,6 @@ class RobotMapDrawer {
 
   markerList = new MarkerList(this);
   hoverPopup = new HoverPopup(this);
-
-  getCamera() {}
 }
 
 //////////////////////// HOVER POPUP ////////////////////////
@@ -650,7 +653,7 @@ class HoverPopup {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
-    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const rect = this.drawer.doms.camera.getBoundingClientRect();
     const drawer = [rect.left, rect.top, rect.width, rect.height];
     const rect2 = this.states.hovering.el.getBoundingClientRect();
     const target = [rect2.left, rect2.top, rect2.width, rect2.height];
@@ -862,7 +865,7 @@ class HoverPopup {
       if (this.testHover()) {
         return;
       }
-      const rect = this.drawer.doms.el.getBoundingClientRect();
+      const rect = this.drawer.doms.camera.getBoundingClientRect();
       const bounding = [rect.left, rect.top, rect.width, rect.height];
       if (!boundingContains(bounding, [x, y])) {
         window.removeEventListener('mousemove', mousemove);
@@ -1012,7 +1015,7 @@ class DistantIndicator {
       .filter((x) => x.handle.hoverable); // because actives include hidden
     const points = data.map(({ x, y }) => [x, y]);
     const merging = this.drawer.config.mergingPx;
-    const r = this.drawer.doms.el.getBoundingClientRect();
+    const r = this.drawer.doms.camera.getBoundingClientRect();
     const p = this.options.indicatorPadding;
     const bounding = paddingRect([r.left, r.top, r.width, r.height], p);
     const solved = distantSolver(points, bounding, merging);
@@ -1063,7 +1066,7 @@ class DistantIndicator {
     // 3  4  5
     // 6  7  8
     // update dom tree
-    const r = this.drawer.doms.el.getBoundingClientRect();
+    const r = this.drawer.doms.camera.getBoundingClientRect();
     const p = this.options.indicatorPadding;
     const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
     const [u0, v0] = [x0 + w0, y0 + h0];
@@ -1127,7 +1130,7 @@ class DistantIndicator {
     // // 0  1  2
     // // 3  4  5
     // // 6  7  8
-    // const r = this.drawer.doms.el.getBoundingClientRect();
+    // const r = this.drawer.doms.camera.getBoundingClientRect();
     // const p = this.options.indicatorPadding;
     // const [x0, y0, w0, h0] = paddingRect([0, 0, r.width, r.height], p);
     // const [u0, v0] = [x0 + w0, y0 + h0];
@@ -1239,7 +1242,7 @@ class MarkerList {
     // TODO refactor
     // set camera to contain all markers
     const [x, y, r] = cover.circle;
-    const rect = this.drawer.doms.el.getBoundingClientRect();
+    const rect = this.drawer.doms.camera.getBoundingClientRect();
     const [W, H] = [rect.width, rect.height];
     const zoomX = W / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
     const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
