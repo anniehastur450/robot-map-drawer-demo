@@ -180,7 +180,6 @@ class RobotMapDrawer {
     return (this.ratios.screenPxByMapUnit * this.camera.zoom) / 100;
   }
   registerEl(el) {
-    // this.doms.el = el; // TODO remove this line
     const [mapW, mapH] = this.config.mapSize;
     const resizeObserver = new ResizeObserver((entries) => {
       // getBoundingClientRect includes the border!! get it via el is slightly wrong!!
@@ -576,7 +575,7 @@ class HoverPopup {
    */
   constructor(drawer) {
     this.drawer = drawer;
-    this.doms = {};
+    this.doms = {}; // root
     this.mousemove = null;
     this.states = {};
     this.contents = {};
@@ -587,9 +586,7 @@ class HoverPopup {
     };
   }
   getEl() {
-    if (this.doms.el) {
-      throw new Error('assert false');
-    }
+    this._once = !this._once || invalidAction('already initialized');
     this.setupEventHooks();
     // mr-[-9999px] is to avoid text wrapping when container at right boundary
     // see https://stackoverflow.com/questions/24307922/why-does-an-absolute-position-element-wrap-based-on-its-parents-right-bound
@@ -597,9 +594,9 @@ class HoverPopup {
     return h`
       <div class="absolute mr-[-9999px] bg-white shadow rounded b b-solid b-gray-200 left-[var(--x)] top-[var(--y)] opacity-[var(--op)] transition-opacity max-w-[calc(100vw-var(--p2))] max-h-[calc(100vh-var(--p2))] overflow-auto z-50 pointer-events-none fixed! left-0! top-0!"></div>
     `.also((el) => {
+      this.doms.root = el;
       el.style.setProperty('--op', `${0}`);
       el.style.setProperty('--p2', `${this.options.viewportPaddingPx * 2}px`);
-      this.doms.el = el;
     });
   }
   setupEventHooks() {
@@ -657,7 +654,7 @@ class HoverPopup {
     const drawer = [rect.left, rect.top, rect.width, rect.height];
     const rect2 = this.states.hovering.el.getBoundingClientRect();
     const target = [rect2.left, rect2.top, rect2.width, rect2.height];
-    const rect3 = this.doms.el.getBoundingClientRect();
+    const rect3 = this.doms.root.getBoundingClientRect();
     const popup = [rect3.left, rect3.top, rect3.width, rect3.height];
     return {
       drawer,
@@ -677,11 +674,12 @@ class HoverPopup {
     target = paddingRect(target, -this.options.attachSpaceingPx);
     const [, , ...size] = popup; // size = [w, h]
     const [x, y] = deduceAppropriatePosition(viewport, target, size);
-    const root = this.doms.el;
+    const root = this.doms.root;
     root.style.setProperty('--x', `${x - drawer[0]}px`);
     root.style.setProperty('--y', `${y - drawer[1]}px`);
   }
-  getContentDom(root) {
+  getContentDom() {
+    const root = this.doms.root;
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
@@ -736,7 +734,7 @@ class HoverPopup {
     return handle;
   }
   setShow() {
-    const root = this.doms.el;
+    const root = this.doms.root;
     this.states.delays = Math.min(50, this.drawer.config.hoverPopupDelayMs); // 50 ms
     this.updatePosition();
     root.style.setProperty('--op', `${1}`);
@@ -769,9 +767,9 @@ class HoverPopup {
       },
     };
     this.contents.handle?.detach();
-    this.contents.handle = this.getContentDom(this.doms.el).attach();
-    const root = this.doms.el;
-    /* avoid blinking twice when swithc to hover adjacent marker */
+    this.contents.handle = this.getContentDom().attach();
+    const root = this.doms.root;
+    /* avoid blinking twice when switch to hover adjacent marker */
     root.getAnimations({ subtree: true }).forEach((x) => x.finish());
     this.updatePosition();
   }
@@ -802,7 +800,7 @@ class HoverPopup {
       </div>
     `
       .also((el) => (this.__debug.doms.popupBoundings = el))
-      .attach(this.doms.el);
+      .attach(this.doms.root);
   }
   testHover(point = null) {
     if ((point ?? this.states.prevCursor) == null) {
@@ -988,6 +986,7 @@ class DistantIndicator {
     };
   }
   getEl() {
+    this._once = !this._once || invalidAction('already initialized');
     return h`
       <div class="absolute w-full h-full overflow-hidden"></div>
     `.also((el) => (this.doms.root = el));
@@ -1292,44 +1291,23 @@ class MarkerList {
       this.tracking.markerHandle.set(id, handle);
     }
   }
-  findUnchangedCovers(prevCovers, covers) {
-    /* original algorithm: */
-    // // unchange if both ids is equals ignore order
-    // const unchanged = [];
-    // const detaching = new Set(prevCovers); // prevCovers can be null
-    // const attaching = new Set(covers);
-    // for (const p of [...detaching]) {
-    //   for (const c of attaching) {
-    //     if (p.ids.length !== c.ids.length) {
-    //       continue;
-    //     }
-    //     if (new Set([...p.ids, ...c.ids]).size === p.ids.length) {
-    //       unchanged.push([p, c]);
-    //       detaching.delete(p);
-    //       attaching.delete(c);
-    //       break;
-    //     }
-    //   }
-    // }
-    // return { unchanged, detaching, attaching };
-    /* using general algorithm */
-    return findUnchangedGroups(prevCovers ?? [], covers, (c) => c.ids);
-  }
   updateMarkerCamera() {
     this.updateMarkerDomTree();
-    const solved = this.solveMerging();
+    const { remains, covers } = this.solveMerging();
+    const cached = this.tracking.cached;
 
     // update all markers
-    const remains = new Set(solved.remains);
+    const set = new Set(remains);
     for (const [id, handle] of this.tracking.markerHandle) {
-      const opacity = remains.has(id) ? 1 : 0;
+      const opacity = set.has(id) ? 1 : 0;
       handle.update(this.markerMap.get(id), opacity);
     }
 
     // update all covers
-    const { unchanged, detaching, attaching } = this.findUnchangedCovers(
-      this.tracking.cached.covers,
-      solved.covers
+    const { unchanged, detaching, attaching } = findUnchangedGroups(
+      cached.covers ?? [],
+      covers,
+      (c) => c.ids
     );
     for (const [p, c] of unchanged) {
       c.handle = p.handle.update(c);
@@ -1340,8 +1318,8 @@ class MarkerList {
     for (const c of attaching) {
       c.handle = this.getCoverDom().update(c).attach();
     }
-    this.tracking.cached.remains = solved.remains; // only for distant to use
-    this.tracking.cached.covers = solved.covers;
+    cached.remains = remains; // only for distant to use
+    cached.covers = covers;
 
     // update distant indicator
     this.distants.updateIndicator();
