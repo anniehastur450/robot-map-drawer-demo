@@ -293,7 +293,8 @@ class RobotMapDrawer {
 
         <!-- zoom buttons -->
         <div class="absolute top-1 left-1 text-gray">
-          <div class="flex shadow rounded overflow-hidden z-50 relative">
+          <div class="flex shadow rounded overflow-hidden z-50 relative"
+          ${attr((el) => this.doms.ui.push({ el, region: 0 }))} >
             <button title="zoom fit" class="btn w-6 h-6 bg-white hover:text-gray-500 flex justify-center items-center"
             ${events({ click: () => this.zoomFit() })} >
               <i class="fas fa-expand"></i>
@@ -351,7 +352,8 @@ class RobotMapDrawer {
               },
             })} >
           </div>
-          <div class="mt-1 w-fit shadow rounded overflow-hidden z-50 relative">
+          <div class="mt-1 w-fit shadow rounded overflow-hidden z-50 relative"
+          ${attr((el) => this.doms.ui.push({ el, region: 0 }))} >
             <button title="zoom in" class="btn w-6 h-6 bg-white hover:text-gray-500 flex justify-center items-center"
             ${events({ click: () => this.zoomIn() })} >
               <i class="fas fa-plus"></i>
@@ -451,7 +453,8 @@ class RobotMapDrawer {
         ${this.markerList.distants.getEl()}
 
         <!-- scale bar -->
-        <div class="absolute bg-white/50 text-black/90 px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none">
+        <div class="absolute bg-white/50 text-black/90 px-1.5 bottom-2 right-2 z-50 pointer-events-none select-none"
+        ${attr((el) => this.doms.ui.push({ el, region: 8 }))} >
           <div class="flex items-center">
             <div class="w-[var(--scale-bar)] transition-width h-2 mt-1 b-2 b-solid b-black/90 b-t-none"
             ${attr((el) => (this.doms.scaleBar = el))} ></div>
@@ -726,6 +729,12 @@ class HoverPopup {
         return h`
           <div class="py-1">
             ${entryDom(data.id)}
+          </div>
+        `.el;
+      } else if (data.type === 'distant') {
+        return h`
+          <div class="py-1">
+            TODO!!
           </div>
         `.el;
       }
@@ -1024,41 +1033,136 @@ class DistantIndicator {
     return {
       regions: solved.regions.map((x) => x.map((i) => data[i])),
       edges: ['top', 'left', 'right', 'bottom'].flatMap((x) => {
-        return solved[x].map(({ indexes, span }) => ({
+        return solved[x].map(({ region, indexes, span }) => ({
           type: x,
+          region,
           data: indexes.map((i) => data[i]),
           span,
         }));
       }),
     };
   }
-  getIndicatorDom() {
+  getIndicatorDom(region) {
     const root = this.doms.root;
     // outline outline-black outline-1 bg-black/20
+    let colliBox; // collision box, used to detect ui collision
+    let hoverBox; // hover box
+    // clip-path reference: https://bennettfeely.com/clippy/
     const el = h`
-      <div class="absolute w-0 h-0 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-800/80 flex justify-center items-center">
+      <div class="absolute w-[16px] h-[14px] -translate-1/2 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-700/80 flex justify-center items-center opacity-[var(--op,1)]">
+        <div class="absolute -translate-x-1/2 w-full h-[2px]"
+        ${attr((el) => (colliBox = el))} ></div>
+        ${(region % 2 === 0
+          ? h`<div class="absolute -translate-x-1/2 w-1/2 h-full"></div>`
+          : h`<div style="clip-path: polygon(100% 100%, 0 0, 100% 0);"
+              class="absolute translate-x-[-8px] w-[8px] h-[8px] scale-[1.5] rotate-45"></div>`
+        ).also((el) => (hoverBox = el))}
         <div class="translate-x-[-4px] w-[24px] h-[24px]">
           ${chevronRight()}
         </div>
       </div>
     `.el;
+    const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
+    el.style.setProperty('--r', `${rotate * 45}deg`);
     // attached data: active (for hover popup)
     const handle = {
+      type: 'distant',
       el,
       get hoverable() {
-        return false; // TODO hover distant indicator
+        return true; // TODO hover distant indicator
       },
-      update: (region, x, y) => {
-        const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
-        el.style.setProperty('--x', `${x}px`);
-        el.style.setProperty('--y', `${y}px`);
-        el.style.setProperty('--r', `${rotate * 45}deg`);
+      setHovering(hovering) {
+        el.style.setProperty('--op', hovering ? '1' : '0.8');
+      },
+      update: (rx, ry) => {
+        el.style.setProperty('--x', `${rx}px`);
+        el.style.setProperty('--y', `${ry}px`);
+        // detect intersection with drawer ui, if being covered, try to move to a better location
+        const rectOf = (el) => {
+          const rect = el.getBoundingClientRect();
+          const { left: x, top: y, width: w, height: h } = rect;
+          return { x, y, w, h, r: [x, y, w, h] };
+        };
+        const rectOfR = ([x, y, w, h]) => ({ x, y, w, h, r: [x, y, w, h] });
+        const setH = ([x, y, w, h], h2, s) => [x, y + (h - h2) * s, w, h2];
+        const setW = ([x, y, w, h], w2, s) => [x + (w - w2) * s, y, w2, h];
+        if (!this._solutions) {
+          // 0  1  2
+          // 3  4  5
+          // 6  7  8
+          const so = [...Array(9)].map((x) => []);
+          // extend: (r1, r0) => [x, y, w, h]
+          // collide: (r2, r1, ex) => [x, y]   // ex means extra offset px
+          const top = {
+            extend: ({ r, y, h }, r0) => setH(r, y + h - r0.y, 1),
+            collide: ({ x }, { y, h }, ex) => [x, y + h + ex], // y = v2
+          };
+          const left = {
+            extend: ({ r, x, w }, r0) => setW(r, x + w - r0.x, 1),
+            collide: ({ y }, { x, w }, ex) => [x + w + ex, y], // x = u2
+          };
+          const right = {
+            extend: (r1, { x, w }) => setW(r1.r, x + w - r1.x, 0),
+            collide: ({ y, w }, { x }, ex) => [x - w - ex, y], // x = x2 - w
+          };
+          const bottom = {
+            extend: (r1, { y, h }) => setH(r1.r, y + h - r1.y, 0),
+            collide: ({ x, h }, { y }, ex) => [x, y - h - ex], // y = y2 - h
+          };
+          [0, 1, 2].forEach((i) => so[i].push(top));
+          [0, 3, 6].forEach((i) => so[i].push(left));
+          [2, 5, 8].forEach((i) => so[i].push(right));
+          [6, 7, 8].forEach((i) => so[i].push(bottom));
+          this._solutions = so;
+        }
+        const r0 = rectOf(this.drawer.doms.camera);
+        // fetch and extend all ui boundings
+        const boundings = [];
+        for (const { el, region } of this.drawer.doms.ui) {
+          let r = rectOf(el);
+          for (const { extend } of this._solutions[region]) {
+            r = rectOfR(extend(r, r0));
+          }
+          boundings.push(r);
+        }
+        const collided = (r1, r2) => {
+          const [x, y, w, h] = intersectBounding(r1.r, r2.r);
+          return w > 0 && h > 0;
+        };
+        let testCollide = true;
+        const maxTries = 10;
+        let tries = 0;
+        while (testCollide && ++tries < maxTries) {
+          testCollide = false;
+          for (const r1 of boundings) {
+            const r2 = rectOf(colliBox);
+            if (!collided(r1, r2)) {
+              continue;
+            }
+            testCollide = true;
+            const ex = 1; // extra offset px
+            const positions = this._solutions[region].map((f) =>
+              f.collide(r2, r1, ex)
+            );
+            const dis = ([x, y]) => Math.hypot(x - r2.x, y - r2.y);
+            const min = positions.reduce((p, c) => (dis(p) < dis(c) ? p : c));
+            const [dx, dy] = [min[0] - r2.x, min[1] - r2.y];
+            rx += dx;
+            ry += dy;
+            el.style.setProperty('--x', `${rx}px`);
+            el.style.setProperty('--y', `${ry}px`);
+          }
+        }
+        if (tries >= maxTries) {
+          console.warn(`tries >= maxTries: ${tries} >= ${maxTries}`);
+        }
         return handle;
       },
       /* attach or detach (no fade in or fade out) */
       /* fading in or out does not feel right, so not used */
       ...handleAttachor(root, el, this.tracking.actives),
     };
+    this.drawer.attachedData.set(hoverBox, handle);
     return handle;
   }
   updateIndicator() {
@@ -1081,8 +1185,8 @@ class DistantIndicator {
     for (const i of [0, 2, 6, 8]) {
       if (regions[i].length !== 0) {
         regions[i].handle = (
-          cached.regions?.[i].handle ?? this.getIndicatorDom().attach()
-        ).update(i, ...corners[i]);
+          cached.regions?.[i].handle ?? this.getIndicatorDom(i).attach()
+        ).update(...corners[i]);
       } else {
         cached.regions?.[i].handle?.detach();
       }
@@ -1096,10 +1200,10 @@ class DistantIndicator {
     );
     const [ox, oy] = [r.left, r.top];
     const types = {
-      top: /*    */ (c) => [1, c - ox, y0],
-      left: /*   */ (c) => [3, x0, c - oy],
-      right: /*  */ (c) => [5, u0, c - oy],
-      bottom: /* */ (c) => [7, c - ox, v0],
+      top: /*    */ (c) => [c - ox, y0],
+      left: /*   */ (c) => [x0, c - oy],
+      right: /*  */ (c) => [u0, c - oy],
+      bottom: /* */ (c) => [c - ox, v0],
     };
     const update = (handle, ed) => {
       const [c, r] = ed.span;
@@ -1112,7 +1216,7 @@ class DistantIndicator {
       p.handle.detach();
     }
     for (const c of attaching) {
-      c.handle = update(this.getIndicatorDom(), c).attach();
+      c.handle = update(this.getIndicatorDom(c.region), c).attach();
     }
 
     cached.regions = regions;

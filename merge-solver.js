@@ -255,26 +255,29 @@ function distantSolver(points, bounding, mergingDistance) {
   // 0  1  2
   // 3  4  5
   // 6  7  8
-  const solve = (indexes, scalarGetter) => {
+  const solve = (region, scalarGetter) => {
+    const indexes = regions[region];
     const scalars = indexes.map((i) => scalarGetter(i));
     const res = mergeSolver1D(scalars, mergingDistance);
     for (const distant of res) {
       // re-map indexes
       distant.indexes = distant.indexes.map((i) => indexes[i]);
+      distant.region = region;
     }
     return res;
   };
-  const top /*    */ = solve(regions[1], (i) => points[i][0]); // xs
-  const bottom /* */ = solve(regions[7], (i) => points[i][0]); // xs
-  const left /*   */ = solve(regions[3], (i) => points[i][1]); // ys
-  const right /*  */ = solve(regions[5], (i) => points[i][1]); // ys
+  const top /*    */ = solve(1, (i) => points[i][0]); // xs
+  const left /*   */ = solve(3, (i) => points[i][1]); // ys
+  const right /*  */ = solve(5, (i) => points[i][1]); // ys
+  const bottom /* */ = solve(7, (i) => points[i][0]); // xs
 
   return {
     regions,
+    edges: [top, left, right, bottom].flat(),
     top,
+    left,
     right,
     bottom,
-    left,
   };
 }
 
