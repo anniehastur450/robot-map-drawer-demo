@@ -515,10 +515,16 @@ function additionalHoverRegions(popup, target) {
   // some essential
   const [u0, v0] = [x0 + w0, y0 + h0];
   const [u1, v1] = [x1 + w1, y1 + h1];
-  const x = clamp(x0, x1, (x1 + u1) / 2);
-  const u = clamp(u0, (x1 + u1) / 2, u1);
-  const y = clamp(y0, y1, (y1 + v1) / 2);
-  const v = clamp(v0, (y1 + v1) / 2, v1);
+  /* cover half */
+  // const x = clamp(x0, x1, (x1 + u1) / 2);
+  // const u = clamp(u0, (x1 + u1) / 2, u1);
+  // const y = clamp(y0, y1, (y1 + v1) / 2);
+  // const v = clamp(v0, (y1 + v1) / 2, v1);
+  /* cover full */
+  const x = x1;
+  const u = u1;
+  const y = y1;
+  const v = v1;
   const res = [[x, y, u - x, v - y]];
   const minmax = (a, b) => [Math.min(a, b), Math.max(a, b)];
   const [x4, x3] = minmax(x, x0);
