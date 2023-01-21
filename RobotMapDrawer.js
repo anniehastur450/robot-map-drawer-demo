@@ -794,7 +794,9 @@ class HoverPopup {
     if (!this.states.showing) {
       return [];
     }
-    let { target, popup } = this.getEssentialBoundings();
+    let { drawer, target, popup } = this.getEssentialBoundings();
+    /* because now addition cover full, lets clip target by drawer region */
+    target = intersectBounding(target, drawer);
     const res = additionalHoverRegions(popup, target);
     return [popup, ...res];
   }
