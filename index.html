@@ -39,94 +39,43 @@
   </head>
   <body>
     <div id="app"></div>
-    <div>
-      Robot Map Drawer
-      <div class="b b-solid b-gray-200">
-        <div id="main-drawer" class="aspect-80/36 w-full"></div>
+    <div class="flex flex-col lg:flex-row">
+      <div class="w-full lg:max-w-2xl xl:max-w-4xl 2xl:max-w-6xl">
+        Robot Map Drawer
+        <div class="b b-solid b-gray-200">
+          <div id="main-drawer" class="aspect-80/36 w-full"></div>
+        </div>
       </div>
-    </div>
-    <br />
-    <div>
-      <h2>Debug</h2>
-      <script>
-        window.el = () => document.getElementById('main-drawer');
-      </script>
-      <div>
-        <button onclick="el().style.aspectRatio='4/3'">aspect-4/3</button>
-        <button onclick="el().style.aspectRatio='16/9'">aspect-16/9</button>
-        <button onclick="el().style.aspectRatio='80/36'">aspect-80/36</button>
-        <button onclick="el().style.aspectRatio='16/5'">aspect-16/5</button>
-        <button onclick="el().style.aspectRatio='21/5'">aspect-21/5</button>
-        <br /><br />
-        <button onclick="">Map_1</button>
-        <button onclick="">Map_2</button>
-        <button onclick="">Map_3</button>
+      <div class="lg:ml-4">
+        <h2 class="lg:mt-0">Debug</h2>
+        <script>
+          window.el = () => document.getElementById('main-drawer');
+        </script>
+        <div>
+          <button onclick="el().style.aspectRatio='3/4'">aspect-3/4</button>
+          <button onclick="el().style.aspectRatio='4/3'">aspect-4/3</button>
+          <button onclick="el().style.aspectRatio='16/9'">aspect-16/9</button>
+          <button onclick="el().style.aspectRatio='80/36'">aspect-80/36</button>
+          <button onclick="el().style.aspectRatio='32/9'">aspect-32/9</button>
+          <button onclick="el().style.aspectRatio='5/1'">aspect-5/1</button>
+          <button onclick="el().requestFullscreen()">Full Screen</button>
+          <br /><br />
+          <button onclick="">Map_1</button>
+          <button onclick="">Map_2</button>
+          <button onclick="">Map_3</button>
+          <div>
+            <div class="hidden xs:block">xs</div>
+            <div class="hidden sm:block">sm</div>
+            <div class="hidden md:block">md</div>
+            <div class="hidden lg:block">lg</div>
+            <div class="hidden xl:block">xl</div>
+            <div class="hidden 2xl:block">2xl</div>
+            <div class="hidden 3xl:block">3xl</div>
+          </div>
+          <div class="h-[1024px] bg-amber/50">dummy element height 1024px</div>
+        </div>
+        <div id="debug"></div>
       </div>
-      <div id="debug"></div>
-    </div>
-    <div class="mx-10 my-10 w-[24px] h-[24px] absolute rotate-[0] scale-[3]">
-      <svg
-        width="24px"
-        height="24px"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="feather feather-chevron-right"
-      >
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
-    </div>
-    <div class="mx-10 my-10 w-[24px] h-[24px] absolute rotate-90 scale-[3]">
-      <svg
-        width="24px"
-        height="24px"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="feather feather-chevron-right"
-      >
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
-    </div>
-    <div class="mx-10 my-10 w-[24px] h-[24px] absolute rotate-180 scale-[3]">
-      <svg
-        width="24px"
-        height="24px"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="feather feather-chevron-right"
-      >
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
-    </div>
-    <div class="mx-10 my-10 w-[24px] h-[24px] absolute rotate-270 scale-[3]">
-      <svg
-        width="24px"
-        height="24px"
-        viewBox="0 0 24 24"
-        xmlns="http://www.w3.org/2000/svg"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-        class="feather feather-chevron-right"
-      >
-        <polyline points="9 18 15 12 9 6"></polyline>
-      </svg>
     </div>
   </body>
 </html>

@@ -1,5 +1,6 @@
 import { h, attr, events } from './dom-helper.js';
 import { mergeSolver, distantSolver } from './merge-solver.js';
+import { startPanning } from './panning-helper.js';
 
 const fallbackConfig = {
   mapImgUrl: null, //  required
@@ -29,39 +30,6 @@ const fallbackConfig = {
   focusingZoom: 100, // zoom level of clicking a marker
 };
 
-/* calculate cursor velocity in last [ms] ms */
-function calculateVelocity(trails, ms) {
-  // trails: [x, y, t]...
-  let dt = 0;
-  let [dx, dy] = [0, 0];
-  for (let i = trails.length - 2; i >= 0; i--) {
-    const [x2, y2, t2] = trails[i + 1];
-    const [x, y, t] = trails[i];
-    if (dt + (t2 - t) < ms) {
-      dt += t2 - t;
-      dx += x2 - x;
-      dy += y2 - y;
-    } else {
-      const ddt = ms - dt;
-      dt += ddt;
-      dx += (ddt / (t2 - t)) * (x2 - x);
-      dy += (ddt / (t2 - t)) * (y2 - y);
-      break;
-    }
-  }
-  // this is the minimum time frame could be (1 ms),
-  // avoid the situation when dt = 0
-  dt = Math.max(1, dt);
-  return {
-    dt,
-    dx,
-    dy,
-    velocity: Math.hypot(dx, dy) / dt,
-    velocityX: dx / dt,
-    velocityY: dy / dt,
-  };
-}
-
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -70,18 +38,16 @@ function invalidAction(x) {
   throw new Error(`invalid action: ${x}`);
 }
 
-function createHooks() {
+function customEventHooks() {
+  function rootHook() {
+    const hooks = [];
+    const fn = (...args) => hooks.forEach((x) => x(...args));
+    return Object.assign(fn, { hooks });
+  }
   return {
-    addHooks(listeners) {
+    registerHooks(listeners) {
       for (const [type, listener] of Object.entries(listeners)) {
-        if (!this[type]) {
-          const fn = (...args) => {
-            this[type].hooks.forEach((x) => x(...args));
-          };
-          fn.hooks = [];
-          this[type] = fn;
-        }
-        this[type].hooks.push(listener);
+        (this[type] ?? (this[type] = rootHook())).hooks.push(listener);
       }
     },
   };
@@ -101,9 +67,10 @@ class RobotMapDrawer {
     this.doms = {
       ui: [], // for distant indicator to not being covered by ui
     }; // (no root), camera, map, zoom, zoomInput, scaleBar, scaleText
-    this.ratios = {};
+    this.ratios = {}; // screenPxByMapUnit
+    this.panning = null; // panning
     this.viewAnimations = null;
-    this.eventHooks = createHooks(); // for hover popup to use only
+    this.eventHooks = customEventHooks(); // preZoom, prePan
     /* 
       attached data, key: el, value: dom handle
       hoverable has the following value: { 
@@ -116,6 +83,51 @@ class RobotMapDrawer {
         }
      */
     this.attachedData = new WeakMap(); // this is for elementsFromPoint to look up only
+  }
+  createPanning() {
+    return startPanning(this.camera.zoom, this.camera.offset);
+  }
+  projectClientPoints(s) {
+    // s = 0: no zoom, s = 1: get screen point on map
+    const rect = this.doms.camera.getBoundingClientRect();
+    const x0 = rect.left + rect.width / 2;
+    const y0 = rect.top + rect.height / 2;
+    const [ox, oy] = this.camera.offset;
+    const r = this.ratios.screenPxByMapUnit * (this.camera.zoom / 100) ** s;
+    const mapper = ({ clientX, clientY }) => {
+      const [u, v] = [clientX - x0, clientY - y0];
+      return [s * ox + u / r, s * oy + v / r];
+    };
+    return mapper;
+  }
+  panStart(...pointers) {
+    if (!this.panning) {
+      this.panning = this.createPanning();
+    }
+    const mapper = this.projectClientPoints(0);
+    const t = performance.now();
+    for (const [id, e] of pointers) {
+      this.panning.start(id, mapper(e), t);
+    }
+  }
+  panMove(...pointers) {
+    const mapper = this.projectClientPoints(0);
+    const t = performance.now();
+    for (const [id, e] of pointers) {
+      this.panning.move(id, mapper(e), t);
+    }
+    this.camera.offset = this.panning.offset.slice();
+    this.setZoom(Math.round(this.panning.zoom)); // round it to look better
+  }
+  panEnd(...pointers) {
+    for (const [id] of pointers) {
+      this.panning.end(id);
+    }
+    if (this.panning.pointers.size > 0) {
+      return;
+    }
+    // do inertia
+    this.panning = null;
   }
   zoomFit() {
     this.viewAnimations?.stop();
@@ -133,10 +145,7 @@ class RobotMapDrawer {
     };
   }
   setZoom(next, cursor) {
-    if (!this.doms.zoomInput.disabled) {
-      // cancel editing
-      this.doms.zoomInput.disabled = true;
-    }
+    this.eventHooks.preZoom?.(); // pre zoom event hook
     let [dx, dy] = [0, 0];
     if (cursor) {
       const curr = this.camera.zoom;
@@ -266,6 +275,41 @@ class RobotMapDrawer {
       this.setZoom(this.camera.zoom); // reset zoom text
     }
   }
+  registerZoomInputEl(el) {
+    this.doms.zoomInput = el;
+    const observer = new MutationObserver(() => {
+      if (el.disabled) {
+        el.style.removeProperty('--input-w');
+      } else {
+        const rect = this.doms.zoom.getBoundingClientRect();
+        el.style.setProperty('--input-w', `${rect.width}px`);
+        el.value = this.doms.zoom.textContent;
+        el.focus();
+        el.select();
+      }
+    });
+    observer.observe(el, {
+      attributeFilter: ['disabled'],
+    });
+    el.disabled = true;
+    events({
+      blur: () => el.disabled || this.trySetZoom(el.value),
+      keydown: (e) => {
+        ({
+          Enter: () => this.trySetZoom(el.value),
+          Escape: () => this.setZoom(this.camera.zoom), // reset zoom text
+        }[e.key]?.());
+      },
+      input: () => {
+        this.doms.zoom.textContent = el.value;
+        const rect = this.doms.zoom.getBoundingClientRect();
+        el.style.setProperty('--input-w', `${rect.width}px`);
+      },
+    }).apply(el);
+    this.eventHooks.registerHooks({
+      preZoom: () => (el.disabled = true), // cancel editing
+    });
+  }
   attach(target) {
     h`
       <div class="w-full h-full relative font-sans">
@@ -280,54 +324,11 @@ class RobotMapDrawer {
             </button>
             <button title="edit zoom level" class="btn h-6 bg-white hover:text-gray-500 b-l b-l-solid b-l-gray-200 flex justify-center items-center px-1"
             ${attr((el) => (this.doms.zoom = el))}
-            ${events({
-              click: () => {
-                this.doms.zoomInput.disabled = false;
-              },
-            })} >
+            ${events({ click: () => (this.doms.zoomInput.disabled = false) })} >
               100%
             </button>
-            <input value="100%" class="btn absolute right-0 w-[var(--input-w)] h-6 bg-white text-gray-500 text-center"
-            ${attr((el) => {
-              this.doms.zoomInput = el;
-              const observer = new MutationObserver(() => {
-                if (el.disabled) {
-                  el.classList.add('invisible');
-                  el.style.setProperty('--input-w', '0');
-                } else {
-                  const rect = this.doms.zoom.getBoundingClientRect();
-                  el.classList.remove('invisible');
-                  el.style.setProperty('--input-w', `${rect.width}px`);
-                  el.value = this.doms.zoom.textContent;
-                  el.focus();
-                  el.select();
-                }
-              });
-              observer.observe(el, {
-                attributeFilter: ['disabled'],
-              });
-              el.disabled = true;
-            })}
-            ${events({
-              blur: (e) => {
-                if (!e.target.disabled) {
-                  this.trySetZoom(e.target.value);
-                }
-              },
-              keydown: (e) => {
-                if (e.key === 'Enter') {
-                  this.trySetZoom(e.target.value);
-                }
-                if (e.key === 'Escape') {
-                  this.setZoom(this.camera.zoom); // reset zoom text
-                }
-              },
-              input: (e) => {
-                this.doms.zoom.textContent = e.target.value;
-                const rect = this.doms.zoom.getBoundingClientRect();
-                e.target.style.setProperty('--input-w', `${rect.width}px`);
-              },
-            })} >
+            <input value="100%" class="btn absolute right-0 w-[var(--input-w,0)] h-6 bg-white text-gray-500 text-center"
+            ${attr((el) => this.registerZoomInputEl(el))} >
           </div>
           <div class="mt-1 w-fit shadow rounded overflow-hidden z-50 relative"
           ${attr((el) => this.doms.ui.push({ el, region: 0 }))} >
@@ -345,47 +346,21 @@ class RobotMapDrawer {
         <!-- drag panel -->
         <div class="absolute w-full h-full z-40 select-none"
         ${events({
+          /* refine panning logic, add touch support */
+          // do not use preventDefault() to avoid selection, use select-none instead,
+          // otherwise no mouse event when cursor outside iframe
           mousedown: (e) => {
             if (e.button !== 0) {
               return;
             }
-            this.eventHooks.pandown?.();
-            this.viewAnimations?.stop();
-            const el = e.target;
-            // do not use preventDefault() to avoid selection, use select-none instead,
-            // otherwise no mouse event when cursor outside iframe
-            let [prevX, prevY] = [e.clientX, e.clientY];
-            const trails = [[prevX, prevY, performance.now()]];
-            let dragging = false; // only for hooks to use
-            const moveThreshold = 2; // minimum distance before movement is considered dragging
+            // this.eventHooks.prePan?.(); // pre pan event hook
+            this.panStart(['mouse', e]);
             const mousemove = (e) => {
-              const [x, y] = [e.clientX, e.clientY];
-              if (!dragging) {
-                if (Math.hypot(x - prevX, y - prevY) < moveThreshold) {
-                  return;
-                }
-                dragging = true;
-                el.classList.add('cursor-move');
-                this.eventHooks.panstart?.();
-              }
-              this.camera.offset[0] -= (x - prevX) / this.zoomedRatioScreenPx;
-              this.camera.offset[1] -= (y - prevY) / this.zoomedRatioScreenPx;
-              this.updateCamera();
-              [prevX, prevY] = [x, y];
-              trails.push([prevX, prevY, performance.now()]);
+              this.panMove(['mouse', e]);
             };
             const mouseup = (e) => {
-              trails.push([e.clientX, e.clientY, performance.now()]);
-              const { velocity, velocityX, velocityY } =
-                /* */ calculateVelocity(trails, 50);
-              if (dragging && velocity > 0) {
-                this.startInertiaDragging(velocityX, velocityY);
-              } else if (dragging) {
-                this.eventHooks.panend?.();
-              } else {
-                this.eventHooks.panclick?.();
-              }
-              el.classList.remove('cursor-move');
+              this.panMove(['mouse', e]);
+              this.panEnd(['mouse']);
               window.removeEventListener('mousemove', mousemove);
               window.removeEventListener('mouseup', mouseup);
             };
@@ -406,8 +381,48 @@ class RobotMapDrawer {
             }
           },
           mousemove: (e) => {
-            this.hoverPopup.registerGlobalMousemoveEvent(e);
+            // this.hoverPopup.registerGlobalMousemoveEvent(e); // TODO
           },
+          mouseclick: (e) => {
+            console.log('clicked drag');
+          },
+          // TODO study pointer events (?)
+          /* touch events */
+          // TODO add touch focus state, so when "blur" allow user to scroll the page over the drawer
+          ...(() => {
+            function getPointers(e) {
+              return [...e.changedTouches].map((t) => [t.identifier, t]);
+            }
+            const touchstart = (e) => {
+              e.preventDefault();
+              this.panStart(...getPointers(e));
+            };
+            const touchmove = (e) => {
+              e.preventDefault();
+              this.panMove(...getPointers(e));
+            };
+            const touchend = (e, touchcancel) => {
+              /*
+                touchcancel touch position of event returned:
+                  * 1. go back to its touch start position, which happens when user actions
+                  *    that act like blurring the application, such as the notification drop-down
+                  * 2. stay at last position, like when turn off screen
+               */
+              e.preventDefault();
+              if (!touchcancel) {
+                touchmove(e);
+              }
+              this.panEnd(...getPointers(e));
+            };
+            return {
+              touchstart,
+              touchmove,
+              touchend,
+              touchcancel: (e) => {
+                touchend(e, true);
+              },
+            };
+          })(),
         })} >
         </div>
 
@@ -460,7 +475,35 @@ class RobotMapDrawer {
   markerList = new MarkerList(this);
   hoverPopup = new HoverPopup(this);
 
-  getCameraProjection() {}
+  getMapPanner() {
+    return ProjectionMath.startPanning(this.camera.zoom, this.camera.offset);
+  }
+  getCameraProjection() {
+    function rectOf(el, s) {
+      const r = el.getBoundingClientRect();
+      const [x, y, w, h] = [r.left * s, r.top * s, r.width, r.height];
+      return;
+    }
+    function pointOf(r, s, t) {
+      const [x, y, w, h] = r;
+      return [x + w * s, y + h * t];
+    }
+    function s(f) {
+      // return (...)/
+    }
+    const a = 0.5;
+    /*
+      example usage:
+        getCameraProjection()
+          .rect(this.doms.camera, 1)
+          .point(0.5, 0.5)
+          .rel(e.clientX, e.clientY)
+          .
+
+
+     */
+    return {};
+  }
 }
 
 //////////////////////// HOVER POPUP ////////////////////////
@@ -595,7 +638,7 @@ class HoverPopup {
     });
   }
   setupEventHooks() {
-    this.drawer.eventHooks.addHooks({
+    this.drawer.eventHooks.registerHooks({
       panstart: () => {
         this.states.panning = true;
         this.states.delays = null; // reset hovering
@@ -619,7 +662,6 @@ class HoverPopup {
       },
       /* to have more accurate click and down must be the same element */
       panclick: () => {
-        // TODO: check for left button only
         if (!this.states.hovering) {
           return;
         }
@@ -823,7 +865,8 @@ class HoverPopup {
   }
   testHover(point = null) {
     if ((point ?? this.states.prevCursor) == null) {
-      console.warn('prev cursor is not set');
+      // TODO fix it (because touch has no hover)
+      // console.warn('prev cursor is not set');
       return;
     }
     const [x, y] = point ?? this.states.prevCursor;
@@ -1070,7 +1113,7 @@ class DistantIndicator {
     `.el;
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
     el.style.setProperty('--r', `${rotate * 45}deg`);
-    // attached data: union { targets, ids }, active (for hover popup)
+    // attached data: union { targetHandles, ids }, active (for hover popup)
     const handle = {
       type: 'distant',
       el,
@@ -1080,10 +1123,10 @@ class DistantIndicator {
       setHovering(hovering) {
         el.style.setProperty('--op', hovering ? '0.6' : '1');
       },
-      update: (targets, [rx, ry]) => {
+      update: (targetHandles, [rx, ry]) => {
         handle.union = {
-          targets,
-          ids: targets.flatMap((x) => {
+          targetHandles,
+          ids: targetHandles.flatMap((x) => {
             if (x.type === 'marker') {
               return x.id;
             } else if (x.type === 'cover') {
@@ -1199,11 +1242,11 @@ class DistantIndicator {
       8: [u0, v0],
     };
     for (const i of [0, 2, 6, 8]) {
-      const targets = [...regions[i]].map((x) => x.handle);
+      const targetHandles = [...regions[i]].map((x) => x.handle);
       if (regions[i].length !== 0) {
         regions[i].handle = (
           cached.regions?.[i].handle ?? this.getIndicatorDom(i).attach()
-        ).update(targets, corners[i]);
+        ).update(targetHandles, corners[i]);
       } else {
         cached.regions?.[i].handle?.detach();
       }
@@ -1224,8 +1267,8 @@ class DistantIndicator {
     };
     const update = (handle, ed) => {
       const [c, r] = ed.span;
-      const targets = [...ed.data].map((x) => x.handle);
-      return handle.update(targets, types[ed.region](c));
+      const targetHandles = [...ed.data].map((x) => x.handle);
+      return handle.update(targetHandles, types[ed.region](c));
     };
     for (const [p, c] of unchanged) {
       c.handle = update(p.handle, c);
@@ -1573,5 +1616,6 @@ class MarkerListView {
 }
 
 // water level 1396, reviewing code...
+// water level 2: 1672, reviewing touch impl code....
 
 export { RobotMapDrawer };

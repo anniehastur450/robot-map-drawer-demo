@@ -15,7 +15,7 @@ function h(strings, ...values) {
       replacements.push((div) => {
         const [e] = div.querySelectorAll(`[${attr}]`);
         e.removeAttribute(attr);
-        v.fn(e);
+        v.apply(e);
       });
       html += ` ${attr} `;
     } else if (ishtml(v) || (Array.isArray(v) && v.every(ishtml))) {
@@ -51,9 +51,9 @@ function h(strings, ...values) {
   return handle;
 }
 
-function attr(fn) {
+function attr(apply) {
   return {
-    fn,
+    apply,
     [Symbol.for('isattr')]: true,
   };
 }
