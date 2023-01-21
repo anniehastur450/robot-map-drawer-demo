@@ -346,8 +346,12 @@ class RobotMapDrawer {
         <div class="absolute w-full h-full z-40 select-none"
         ${events({
           mousedown: (e) => {
+            if (e.button !== 0) {
+              return;
+            }
             this.eventHooks.pandown?.();
             this.viewAnimations?.stop();
+            const el = e.target;
             // do not use preventDefault() to avoid selection, use select-none instead,
             // otherwise no mouse event when cursor outside iframe
             let [prevX, prevY] = [e.clientX, e.clientY];
@@ -361,8 +365,7 @@ class RobotMapDrawer {
                   return;
                 }
                 dragging = true;
-                e.target.classList.add('cursor-move');
-                console.log(e.target);
+                el.classList.add('cursor-move');
                 this.eventHooks.panstart?.();
               }
               this.camera.offset[0] -= (x - prevX) / this.zoomedRatioScreenPx;
@@ -382,8 +385,7 @@ class RobotMapDrawer {
               } else {
                 this.eventHooks.panclick?.();
               }
-              e.target.classList.remove('cursor-move');
-              console.log(e.target);
+              el.classList.remove('cursor-move');
               window.removeEventListener('mousemove', mousemove);
               window.removeEventListener('mouseup', mouseup);
             };
@@ -618,11 +620,13 @@ class HoverPopup {
         if (this.states.hovering !== this.states.pandown?.cached) {
           return;
         }
-        const data = this.drawer.attachedData.get(this.states.hovering.el);
+        const data = this.states.hovering.data;
         if (data.type === 'cover') {
           this.coverClicked(data.cover);
         } else if (data.type === 'marker') {
           this.markerClicked(data.id);
+        } else if (data.type === 'distant') {
+          this.distantClicked(data.union.ids);
         }
       },
     });
@@ -632,6 +636,9 @@ class HoverPopup {
   }
   coverClicked(cover) {
     this.drawer.markerList.focusCover(cover);
+  }
+  distantClicked(ids) {
+    this.drawer.markerList.focusMarkers(ids);
   }
   getEssentialBoundings() {
     if (!this.states.hovering) {
@@ -670,7 +677,7 @@ class HoverPopup {
     if (!this.states.hovering) {
       throw new Error('no hovering element');
     }
-    const data = this.drawer.attachedData.get(this.states.hovering.el);
+    const data = this.states.hovering.data;
     const entryDom = (id) => {
       const listView = this.drawer.markerList.listViews.default;
       const { name, x, y, color } = this.drawer.markerList.markerMap.get(id);
@@ -713,9 +720,16 @@ class HoverPopup {
           </div>
         `.el;
       } else if (data.type === 'distant') {
+        // TODO: ability to hover multiple distant indicator and show union info of them
+        const ids = data.union.ids;
         return h`
           <div class="py-1">
-            TODO!!
+            <div class="px-2 text-sm text-black/50" ${attr((el) => {
+              el.textContent = `${ids.length} marker${
+                ids.length != 1 ? 's' : ''
+              } out of view`;
+            })} ></div>
+            ${ids.map(entryDom)}
           </div>
         `.el;
       }
@@ -747,12 +761,16 @@ class HoverPopup {
     };
   }
   setHover(el) {
+    const data = this.drawer.attachedData.get(el);
+    data.setHovering?.(true);
     this.states.hovering = {
       el,
+      data,
       timer: setTimeout(() => {
         this.setShow();
       }, this.states.delays ?? this.drawer.config.hoverPopupDelayMs),
       cancel: () => {
+        data.setHovering?.(false);
         this.states.cursor?.setPointer(false);
         this.states.showing?.cancel();
         clearTimeout(this.states.hovering?.timer);
@@ -1026,14 +1044,16 @@ class DistantIndicator {
     let colliBox; // collision box, used to detect ui collision
     let hoverBox; // hover box
     // clip-path reference: https://bennettfeely.com/clippy/
+    // making corner hover like triangle is removed, you can add it:
+    // style="clip-path: polygon(100% 100%, 0 0, 100% 0);"
+    // and set class: translate-x-[-8px] scale-[1.5]
     const el = h`
       <div class="absolute w-[16px] h-[14px] -translate-1/2 left-[var(--x)] top-[var(--y)] rotate-[var(--r)] scale-[2] text-slate-700/80 flex justify-center items-center opacity-[var(--op,1)]">
         <div class="absolute -translate-x-1/2 w-full h-[2px]"
         ${attr((el) => (colliBox = el))} ></div>
         ${(region % 2 !== 0
           ? h`<div class="absolute -translate-x-1/2 w-1/2 h-full"></div>`
-          : h`<div style="clip-path: polygon(100% 100%, 0 0, 100% 0);"
-              class="absolute translate-x-[-8px] w-[8px] h-[8px] scale-[1.5] rotate-45"></div>`
+          : h`<div class="absolute translate-x-[-7px] w-[8px] h-[8px] scale-[1.25] rotate-45"></div>`
         ).also((el) => (hoverBox = el))}
         <div class="translate-x-[-4px] w-[24px] h-[24px]">
           ${chevronRight()}
@@ -1042,7 +1062,7 @@ class DistantIndicator {
     `.el;
     const rotate = [-3, -2, -1, 4, '', 0, 3, 2, 1][region];
     el.style.setProperty('--r', `${rotate * 45}deg`);
-    // attached data: active (for hover popup)
+    // attached data: union { targets, ids }, active (for hover popup)
     const handle = {
       type: 'distant',
       el,
@@ -1050,9 +1070,19 @@ class DistantIndicator {
         return true; // TODO hover distant indicator
       },
       setHovering(hovering) {
-        el.style.setProperty('--op', hovering ? '1' : '0.8');
+        el.style.setProperty('--op', hovering ? '0.6' : '1');
       },
-      update: ([rx, ry]) => {
+      update: (targets, [rx, ry]) => {
+        handle.union = {
+          targets,
+          ids: targets.flatMap((x) => {
+            if (x.type === 'marker') {
+              return x.id;
+            } else if (x.type === 'cover') {
+              return x.cover.ids;
+            }
+          }),
+        };
         el.style.setProperty('--x', `${rx}px`);
         el.style.setProperty('--y', `${ry}px`);
         // detect intersection with drawer ui, if being covered, try to move to a better location
@@ -1161,10 +1191,11 @@ class DistantIndicator {
       8: [u0, v0],
     };
     for (const i of [0, 2, 6, 8]) {
+      const targets = [...regions[i]].map((x) => x.handle);
       if (regions[i].length !== 0) {
         regions[i].handle = (
           cached.regions?.[i].handle ?? this.getIndicatorDom(i).attach()
-        ).update(corners[i]);
+        ).update(targets, corners[i]);
       } else {
         cached.regions?.[i].handle?.detach();
       }
@@ -1185,7 +1216,8 @@ class DistantIndicator {
     };
     const update = (handle, ed) => {
       const [c, r] = ed.span;
-      return handle.update(types[ed.region](c));
+      const targets = [...ed.data].map((x) => x.handle);
+      return handle.update(targets, types[ed.region](c));
     };
     for (const [p, c] of unchanged) {
       c.handle = update(p.handle, c);
@@ -1260,14 +1292,14 @@ class MarkerList {
     return listView;
   }
   focusMarker(id) {
-    //TODO refactor
+    //TODO refactor, use camera projection
     // focus to this marker
     const { x, y } = this.markerMap.get(id);
     this.drawer.camera.offset = [x, y];
     this.drawer.setZoom(this.drawer.config.focusingZoom);
   }
   focusCover(cover) {
-    // TODO refactor
+    // TODO refactor, use camera projection
     // set camera to contain all markers
     const [x, y, r] = cover.circle;
     const rect = this.drawer.doms.camera.getBoundingClientRect();
@@ -1276,6 +1308,30 @@ class MarkerList {
     const zoomY = H / (r * 2 * this.drawer.ratios.screenPxByMapUnit);
     this.drawer.camera.offset = [x, y];
     this.drawer.setZoom(Math.round(Math.min(zoomX, zoomY) * 100));
+  }
+  focusMarkers(ids) {
+    if (ids.length === 0) {
+      return;
+    }
+    // TODO refactor, use camera projection
+    // set camera to contain all markers
+    const markers = ids.map((x) => this.markerMap.get(x));
+    const xs = markers.map(({ x }) => x);
+    const ys = markers.map(({ y }) => y);
+    const [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+    const [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+    const x = (x0 + x1) / 2;
+    const y = (y0 + y1) / 2;
+    const rect = this.drawer.doms.camera.getBoundingClientRect();
+    const [W, H] = [rect.width, rect.height];
+    const zoomX = W / ((x1 - x0) * this.drawer.ratios.screenPxByMapUnit);
+    const zoomY = H / ((y1 - y0) * this.drawer.ratios.screenPxByMapUnit);
+    let zoom = Math.round(Math.min(zoomX, zoomY) * 100) / 2;
+    if (!isFinite(zoom)) {
+      zoom = this.drawer.config.focusingZoom;
+    }
+    this.drawer.camera.offset = [x, y];
+    this.drawer.setZoom(zoom);
   }
   getEl() {
     this._once = !this._once || invalidAction('already initialized');
