@@ -54,7 +54,6 @@ function customEventHooks() {
 }
 
 // to fix: animation is aborted when drawer size change
-// FIX!!!! getBoundingClientRect of drawer includes its border!! so every things is slightly wrong!
 
 class RobotMapDrawer {
   constructor(config) {
@@ -69,8 +68,10 @@ class RobotMapDrawer {
     }; // (no root), camera, map, zoom, zoomInput, scaleBar, scaleText
     this.ratios = {}; // screenPxByMapUnit
     this.panning = null; // panning
+    this.inertiaAnimations = null;
     this.viewAnimations = null;
-    this.eventHooks = customEventHooks(); // preZoom, prePan
+    // event hooks: preZoom, prePanning, postPanning, preInertia, postInertia, postRender, prePanMove
+    this.eventHooks = customEventHooks();
     /* 
       attached data, key: el, value: dom handle
       hoverable has the following value: { 
@@ -87,7 +88,7 @@ class RobotMapDrawer {
   createPanning() {
     return startPanning(this.camera.zoom, this.camera.offset);
   }
-  projectClientPoints(s) {
+  projectClientPoints(s = 0) {
     // s = 0: no zoom, s = 1: get screen point on map
     const rect = this.doms.camera.getBoundingClientRect();
     const x0 = rect.left + rect.width / 2;
@@ -102,22 +103,29 @@ class RobotMapDrawer {
   }
   panStart(...pointers) {
     if (!this.panning) {
+      this.inertiaAnimations?.stop();
+      this.eventHooks.prePanning?.(); // pre panning event hook
       this.panning = this.createPanning();
     }
-    const mapper = this.projectClientPoints(0);
+    const mapper = this.projectClientPoints();
     const t = performance.now();
     for (const [id, e] of pointers) {
       this.panning.start(id, mapper(e), t);
     }
   }
   panMove(...pointers) {
-    const mapper = this.projectClientPoints(0);
+    this.eventHooks.prePanMove?.();
+    const mapper = this.projectClientPoints();
     const t = performance.now();
     for (const [id, e] of pointers) {
       this.panning.move(id, mapper(e), t);
     }
+    // update camera
+    let zoom = this.panning.zoom;
+    zoom = zoom > 10 ? Math.round(zoom) : parseFloat(zoom.toPrecision(3)); // round it to look better
     this.camera.offset = this.panning.offset.slice();
-    this.setZoom(Math.round(this.panning.zoom)); // round it to look better
+    this.camera.zoom = zoom;
+    this.requestUpdateCamera();
   }
   panEnd(...pointers) {
     for (const [id] of pointers) {
@@ -127,10 +135,21 @@ class RobotMapDrawer {
       return;
     }
     // do inertia
+    const t = performance.now();
+    const inertia = this.panning.calculateVelocity(t, 50);
+    // const inertia = this.panning.calculateVelocity(t, 100); // give more time for touch panning
+    // console.log(veloc);
     this.panning = null;
+    this.eventHooks.postPanning?.(); // post panning event hook
+    this.startInertiaDragging(inertia);
+
+    // const [vx, vy] = veloc.v;
+    // this.startInertiaDragging(
+    //   -vx * this.zoomedRatioScreenPx,
+    //   -vy * this.zoomedRatioScreenPx
+    // );
   }
   zoomFit() {
-    this.viewAnimations?.stop();
     // reset camera
     this.camera.offset = [0, 0];
     this.setZoom(100);
@@ -144,33 +163,57 @@ class RobotMapDrawer {
       next,
     };
   }
-  setZoom(next, cursor) {
+  setZoom(zoom, at = null) {
+    this.inertiaAnimations?.stop();
     this.eventHooks.preZoom?.(); // pre zoom event hook
-    let [dx, dy] = [0, 0];
-    if (cursor) {
-      const curr = this.camera.zoom;
-      const [cx, cy] = cursor;
-      dx = (cx / this.zoomedRatioScreenPx) * (1 - curr / next);
-      dy = (cy / this.zoomedRatioScreenPx) * (1 - curr / next);
-    }
-    this.camera.offset[0] += dx;
-    this.camera.offset[1] += dy;
-    this.camera.zoom = next;
-    this.updateCamera();
-    this.eventHooks.zoomchange?.();
+    // clamp zoom
+    const [min] = this.config.zoomLevels;
+    const [max] = this.config.zoomLevels.slice(-1);
+    zoom = clamp(zoom, min, max);
+    // use panning to help zooming
+    const panning = this.panning ?? this.createPanning();
+    panning.trails = []; // clear panning trails if any
+    panning.setZoom(zoom, at ?? [0, 0]);
+    this.camera.offset = panning.offset.slice();
+    this.camera.zoom = zoom;
+    this.requestUpdateCamera();
+    // let [dx, dy] = [0, 0];
+    // if (cursor) {
+    //   const curr = this.camera.zoom;
+    //   const [cx, cy] = cursor;
+    //   dx = (cx / this.zoomedRatioScreenPx) * (1 - curr / next);
+    //   dy = (cy / this.zoomedRatioScreenPx) * (1 - curr / next);
+    // }
+    // this.camera.offset[0] += dx;
+    // this.camera.offset[1] += dy;
+    // this.camera.zoom = next;
+    // this.updateCamera();
+    // this.eventHooks.zoomchange?.();
   }
-  zoomIn(cursor = null) {
+  zoomIn(at = null) {
     const { next } = this.findZoomLevel(this.camera.zoom);
-    this.setZoom(next, cursor);
+    this.setZoom(next, at);
   }
-  zoomOut(cursor = null) {
+  zoomOut(at = null) {
     const { prev } = this.findZoomLevel(this.camera.zoom);
-    this.setZoom(prev, cursor);
+    this.setZoom(prev, at);
   }
   get zoomedRatioScreenPx() {
     return (this.ratios.screenPxByMapUnit * this.camera.zoom) / 100;
   }
   registerEl(el) {
+    // panning hook for disable transition
+    const disable = () => {
+      el.classList.add('panning');
+    };
+    const enable = () => {
+      el.classList.remove('panning');
+    };
+    this.eventHooks.registerHooks({
+      preZoom: enable,
+      prePanMove: disable,
+    });
+    // update when drawer resize
     const [mapW, mapH] = this.config.mapSize;
     const resizeObserver = new ResizeObserver((entries) => {
       // getBoundingClientRect includes the border!! get it via el is slightly wrong!!
@@ -187,6 +230,62 @@ class RobotMapDrawer {
       this.updateCamera();
     });
     resizeObserver.observe(el);
+  }
+  requestUpdateCamera() {
+    // clamp zoom
+    const [min] = this.config.zoomLevels;
+    const [max] = this.config.zoomLevels.slice(-1);
+    this.camera.zoom = clamp(this.camera.zoom, min, max);
+    const update = () => {
+      this._update = null;
+      const el = this.doms.map;
+      const [mapW, mapH] = this.config.mapSize;
+      const [x, y] = this.camera.offset;
+      el.style.setProperty('--x', `${(-x / mapW) * this.camera.zoom}%`);
+      el.style.setProperty('--y', `${(-y / mapH) * this.camera.zoom}%`);
+      el.style.setProperty('--s', `${this.camera.zoom / 100}`);
+      this.doms.zoom.textContent = `${this.camera.zoom}%`;
+      this.updateScaleBar();
+      this.eventHooks.postRender?.();
+    };
+    this._update = this._update ?? requestAnimationFrame(update);
+  }
+  /* other names: kinetic scrolling */
+  startInertiaDragging(inertia) {
+    this.inertiaAnimations?.stop();
+    console.log(inertia);
+    const brakingTime = this.config.brakingTimeMs; // ms
+    const [vx, vy] = inertia.v;
+    const vz = inertia.zoomVelocity - 1;
+    const s = [vx, vy, vz].map((x) => Math.sign(x));
+    const v = [vx, vy, vz].map((x) => Math.abs(x));
+    const a = v.map((x) => -x / brakingTime);
+    const timeout = () => {
+      const t2 = performance.now();
+      const dt = t2 - t1;
+      for (let i = 0; i < v.length; i++) {
+        v[i] = Math.max(0, v[i] + a[i] * dt);
+      }
+      this.camera.offset[0] += v[0] * s[0] * dt;
+      this.camera.offset[1] += v[1] * s[1] * dt;
+      this.camera.zoom *= 1 + v[2] * s[2] * dt;
+      this.requestUpdateCamera();
+      if (v.some((x) => x > 0)) {
+        t1 = t2;
+        timer = requestAnimationFrame(timeout);
+      } else {
+        // finished
+        this.inertiaAnimations?.stop();
+      }
+    };
+    let t1 = performance.now();
+    let timer = requestAnimationFrame(timeout);
+    this.inertiaAnimations = {
+      stop: () => {
+        cancelAnimationFrame(timer);
+        this.inertiaAnimations = null;
+      },
+    };
   }
   updateCamera() {
     if (!this.ratios.screenPxByMapUnit /* 0 is also invalid */) {
@@ -225,51 +324,46 @@ class RobotMapDrawer {
     );
     scaleText.textContent = `${closest} ${this.config.unit}`;
   }
-  /* other names: kinetic scrolling */
-  startInertiaDragging(velocityX, velocityY) {
-    const request = (x) => requestAnimationFrame(x);
-    const cancel = (x) => cancelAnimationFrame(x);
-    this.viewAnimations?.stop();
-    const brakingTime = this.config.brakingTimeMs; // ms
-    let [sx, sy] = [Math.sign(velocityX), Math.sign(velocityY)];
-    let [vx, vy] = [Math.abs(velocityX), Math.abs(velocityY)];
-    let [ax, ay] = [-vx / brakingTime, -vy / brakingTime];
-    const timeout = () => {
-      const t2 = performance.now();
-      const dt = t2 - t1;
-      vx = Math.max(0, vx + ax * dt);
-      vy = Math.max(0, vy + ay * dt);
-      let [x, y] = this.camera.offset;
-      x -= (vx * sx * dt) / this.zoomedRatioScreenPx;
-      y -= (vy * sy * dt) / this.zoomedRatioScreenPx;
-      this.camera.offset = [x, y];
-      this.updateCamera();
-      let v = Math.hypot(vx, vy);
-      if (v > 0) {
-        t1 = t2;
-        timer = request(timeout);
-      } else {
-        // finished
-        this.viewAnimations?.stop();
-      }
-    };
-    let t1 = performance.now();
-    let timer = request(timeout);
-    this.viewAnimations = {
-      stop: () => {
-        cancel(timer);
-        this.viewAnimations = null;
-        this.eventHooks.panend?.();
-      },
-    };
-  }
+  // startInertiaDragging(velocityX, velocityY) {
+  //   const request = (x) => requestAnimationFrame(x);
+  //   const cancel = (x) => cancelAnimationFrame(x);
+  //   this.viewAnimations?.stop();
+  //   const brakingTime = this.config.brakingTimeMs; // ms
+  //   let [sx, sy] = [Math.sign(velocityX), Math.sign(velocityY)];
+  //   let [vx, vy] = [Math.abs(velocityX), Math.abs(velocityY)];
+  //   let [ax, ay] = [-vx / brakingTime, -vy / brakingTime];
+  //   const timeout = () => {
+  //     const t2 = performance.now();
+  //     const dt = t2 - t1;
+  //     vx = Math.max(0, vx + ax * dt);
+  //     vy = Math.max(0, vy + ay * dt);
+  //     let [x, y] = this.camera.offset;
+  //     x -= (vx * sx * dt) / this.zoomedRatioScreenPx;
+  //     y -= (vy * sy * dt) / this.zoomedRatioScreenPx;
+  //     this.camera.offset = [x, y];
+  //     this.updateCamera();
+  //     let v = Math.hypot(vx, vy);
+  //     if (v > 0) {
+  //       t1 = t2;
+  //       timer = request(timeout);
+  //     } else {
+  //       // finished
+  //       this.viewAnimations?.stop();
+  //     }
+  //   };
+  //   let t1 = performance.now();
+  //   let timer = request(timeout);
+  //   this.viewAnimations = {
+  //     stop: () => {
+  //       cancel(timer);
+  //       this.viewAnimations = null;
+  //       this.eventHooks.panend?.();
+  //     },
+  //   };
+  // }
   trySetZoom(zoomString) {
     let zoom = parseFloat(zoomString);
     if (!isNaN(zoom) && zoom) {
-      const zooms = this.config.zoomLevels;
-      const min = zooms[0];
-      const max = zooms[zooms.length - 1];
-      zoom = clamp(zoom, min, max);
       this.setZoom(zoom);
     } else {
       this.setZoom(this.camera.zoom); // reset zoom text
@@ -312,7 +406,7 @@ class RobotMapDrawer {
   }
   attach(target) {
     h`
-      <div class="w-full h-full relative font-sans">
+      <div class="group/drawer w-full h-full relative font-sans">
 
         <!-- zoom buttons -->
         <div class="absolute top-1 left-1 text-gray">
@@ -368,16 +462,13 @@ class RobotMapDrawer {
             window.addEventListener('mouseup', mouseup);
           },
           wheel: (e) => {
-            this.viewAnimations?.stop();
             e.preventDefault();
-            const rect = e.target.getBoundingClientRect();
-            const [x, y] = [e.clientX - rect.left, e.clientY - rect.top];
-            const cx = x - rect.width / 2;
-            const cy = y - rect.height / 2;
+            const mapper = this.projectClientPoints();
+            const cursor = mapper(e);
             if (e.deltaY < 0) {
-              this.zoomIn([cx, cy]);
+              this.zoomIn(cursor);
             } else if (e.deltaY > 0) {
-              this.zoomOut([cx, cy]);
+              this.zoomOut(cursor);
             }
           },
           mousemove: (e) => {
@@ -433,7 +524,7 @@ class RobotMapDrawer {
           el.style.setProperty('--bg', this.config.bgColor);
         })} >
           <div class="w-[var(--aspect-w)] h-[var(--aspect-h)] relative">
-            <div class="absolute w-full h-full transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
+            <div class="absolute w-full h-full group-[:not(.panning)]/drawer:transition-transform translate-x-[var(--x)] translate-y-[var(--y)] scale-[var(--s)]"
             ${attr((el) => (this.doms.map = el))} >
               <img width="0" height="0" class="absolute w-full h-full"
               ${attr((el) => (el.src = this.config.mapImgUrl))} >

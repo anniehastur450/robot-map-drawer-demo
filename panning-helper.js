@@ -57,8 +57,13 @@ class Panning {
     this.pointers = new Map();
     this.trails = [];
   }
-  calculateVelocity(ms) {
-    return calculateVelocity(this.trails, ms);
+  calculateVelocity(t, ms) {
+    this.trails.push([t, ...this.offset, this.zoom]);
+    const res = calculateVelocity(this.trails, ms);
+    const prevZoom = this.zoom - res.dv[2];
+    res.zoomScale = this.zoom / prevZoom;
+    res.zoomVelocity = res.zoomScale ** (1 / res.dt);
+    return res;
   }
   // pointer start
   start(id, [rx, ry], t) {
