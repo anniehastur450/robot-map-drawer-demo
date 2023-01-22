@@ -256,10 +256,21 @@ class RobotMapDrawer {
     console.log(inertia);
     const brakingTime = this.config.brakingTimeMs; // ms
     const [vx, vy] = inertia.v;
+    // // min threshold 0.02 px/ms = 20 px/s (no need, use minimum a)
+    // if (Math.hypot(vx, vy) < 0.02) {
+    //   [vx, vy] = [0, 0];
+    // }
     const vz = inertia.zoomVelocity - 1;
     const s = [vx, vy, vz].map((x) => Math.sign(x));
     const v = [vx, vy, vz].map((x) => Math.abs(x));
     const a = v.map((x) => -x / brakingTime);
+    // min deceleration, it produces more stable result for touch screen users
+    const minDecel = 500e-6 / this.zoomedRatioScreenPx; // minimum deceleration 500 px/s^2
+    const decel = Math.hypot(a[0], a[1]);
+    if (0 < decel && decel < minDecel) {
+      a[0] = (a[0] / decel) * minDecel;
+      a[1] = (a[1] / decel) * minDecel;
+    }
     const timeout = () => {
       const t2 = performance.now();
       const dt = t2 - t1;
@@ -500,18 +511,18 @@ class RobotMapDrawer {
                   * 2. stay at last position, like when turn off screen
                */
               e.preventDefault();
-              if (!touchcancel) {
-                touchmove(e);
-              }
+              // actually user lifting up finger might affect the touch point position a lot
+              // so just do not record it
+              // if (!touchcancel) {
+              //   touchmove(e);
+              // }
               this.panEnd(...getPointers(e));
             };
             return {
               touchstart,
               touchmove,
               touchend,
-              touchcancel: (e) => {
-                touchend(e, true);
-              },
+              touchcancel: (e) => touchend(e, true),
             };
           })(),
         })} >
