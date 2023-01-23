@@ -128,26 +128,18 @@ class RobotMapDrawer {
     this.requestUpdateCamera();
   }
   panEnd(...pointers) {
+    const t = performance.now();
     for (const [id] of pointers) {
-      this.panning.end(id);
+      this.panning.end(id, t);
     }
     if (this.panning.pointers.size > 0) {
       return;
     }
     // do inertia
-    const t = performance.now();
-    const inertia = this.panning.calculateVelocity(t, 50);
-    // const inertia = this.panning.calculateVelocity(t, 100); // give more time for touch panning
-    // console.log(veloc);
+    const panning = this.panning;
     this.panning = null;
     this.eventHooks.postPanning?.(); // post panning event hook
-    this.startInertiaDragging(inertia);
-
-    // const [vx, vy] = veloc.v;
-    // this.startInertiaDragging(
-    //   -vx * this.zoomedRatioScreenPx,
-    //   -vy * this.zoomedRatioScreenPx
-    // );
+    this.startInertiaDragging(panning);
   }
   zoomFit() {
     // reset camera
@@ -251,45 +243,50 @@ class RobotMapDrawer {
     this._update = this._update ?? requestAnimationFrame(update);
   }
   /* other names: kinetic scrolling */
-  startInertiaDragging(inertia) {
+  // TODO: smooth user touch path because data is jitter
+  startInertiaDragging(previousPanning) {
     this.inertiaAnimations?.stop();
-    console.log(inertia);
-    const brakingTime = this.config.brakingTimeMs; // ms
-    const [vx, vy] = inertia.v;
-    // // min threshold 0.02 px/ms = 20 px/s (no need, use minimum a)
-    // if (Math.hypot(vx, vy) < 0.02) {
-    //   [vx, vy] = [0, 0];
-    // }
-    const vz = inertia.zoomVelocity - 1;
-    const s = [vx, vy, vz].map((x) => Math.sign(x));
-    const v = [vx, vy, vz].map((x) => Math.abs(x));
-    const a = v.map((x) => -x / brakingTime);
+    let inertia = previousPanning.calculateVelocity(50);
+    let brakingTime = this.config.brakingTimeMs; // ms
+    // case 1, no zoom, has minDecel
+    // case 2, zoom > threshold, no minDecel
+    // case 3, zoom < threshold, set zoom 0, has minDecel
     // min deceleration, it produces more stable result for touch screen users
-    const minDecel = 500e-6 / this.zoomedRatioScreenPx; // minimum deceleration 500 px/s^2
-    const decel = Math.hypot(a[0], a[1]);
-    if (0 < decel && decel < minDecel) {
-      a[0] = (a[0] / decel) * minDecel;
-      a[1] = (a[1] / decel) * minDecel;
+    let minDecel = 500e-6 / this.zoomedRatioScreenPx; // minimum deceleration 500 px/s^2
+    const zoomThreshold = 2; // zoom is 2 times than its previous second
+    if (Math.abs(Math.log(inertia.b ** 1000)) > Math.log(zoomThreshold)) {
+      minDecel = 0;
+    } else if (inertia.b !== 1) {
+      inertia = inertia.removeZoom();
     }
+    // let's reduce the zooming inertia, it is too fast
+    if (inertia.b !== 1) {
+      // TODO find a better way to achieve this
+      brakingTime *= 0.75;
+    }
+    const [vx0, vx1] = inertia.v(0);
+    const baseVeloc = Math.hypot(vx0, vx1) / inertia.z(0); // in map unit
+    const decel = Math.max(minDecel, baseVeloc / brakingTime); // this decel is positive value
+    // remap time to simulate deceleration, so we have this
+    const u = (t) => baseVeloc && t * (1 - t * (decel / (2 * baseVeloc))); // 0 instead of divide 0
+    const stoppingTime = baseVeloc / decel; // where du/dt = 0
+    const t = performance.now();
     const timeout = () => {
       const t2 = performance.now();
-      const dt = t2 - t1;
-      for (let i = 0; i < v.length; i++) {
-        v[i] = Math.max(0, v[i] + a[i] * dt);
-      }
-      this.camera.offset[0] += v[0] * s[0] * dt;
-      this.camera.offset[1] += v[1] * s[1] * dt;
-      this.camera.zoom *= 1 + v[2] * s[2] * dt;
+      const mappedTime = u(t2 - t);
+      const [sx, sy] = inertia.s(mappedTime);
+      const z = inertia.z(mappedTime);
+      this.camera.offset = [sx / z, sy / z];
+      this.camera.zoom = z * 100;
+      // update camera and request next
       this.requestUpdateCamera();
-      if (v.some((x) => x > 0)) {
-        t1 = t2;
+      if (t2 - t < stoppingTime) {
         timer = requestAnimationFrame(timeout);
       } else {
         // finished
         this.inertiaAnimations?.stop();
       }
     };
-    let t1 = performance.now();
     let timer = requestAnimationFrame(timeout);
     this.inertiaAnimations = {
       stop: () => {
@@ -335,43 +332,6 @@ class RobotMapDrawer {
     );
     scaleText.textContent = `${closest} ${this.config.unit}`;
   }
-  // startInertiaDragging(velocityX, velocityY) {
-  //   const request = (x) => requestAnimationFrame(x);
-  //   const cancel = (x) => cancelAnimationFrame(x);
-  //   this.viewAnimations?.stop();
-  //   const brakingTime = this.config.brakingTimeMs; // ms
-  //   let [sx, sy] = [Math.sign(velocityX), Math.sign(velocityY)];
-  //   let [vx, vy] = [Math.abs(velocityX), Math.abs(velocityY)];
-  //   let [ax, ay] = [-vx / brakingTime, -vy / brakingTime];
-  //   const timeout = () => {
-  //     const t2 = performance.now();
-  //     const dt = t2 - t1;
-  //     vx = Math.max(0, vx + ax * dt);
-  //     vy = Math.max(0, vy + ay * dt);
-  //     let [x, y] = this.camera.offset;
-  //     x -= (vx * sx * dt) / this.zoomedRatioScreenPx;
-  //     y -= (vy * sy * dt) / this.zoomedRatioScreenPx;
-  //     this.camera.offset = [x, y];
-  //     this.updateCamera();
-  //     let v = Math.hypot(vx, vy);
-  //     if (v > 0) {
-  //       t1 = t2;
-  //       timer = request(timeout);
-  //     } else {
-  //       // finished
-  //       this.viewAnimations?.stop();
-  //     }
-  //   };
-  //   let t1 = performance.now();
-  //   let timer = request(timeout);
-  //   this.viewAnimations = {
-  //     stop: () => {
-  //       cancel(timer);
-  //       this.viewAnimations = null;
-  //       this.eventHooks.panend?.();
-  //     },
-  //   };
-  // }
   trySetZoom(zoomString) {
     let zoom = parseFloat(zoomString);
     if (!isNaN(zoom) && zoom) {
