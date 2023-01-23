@@ -1,6 +1,6 @@
 // Import stylesheets
 import './style.css';
-import { RobotMapDrawer } from './RobotMapDrawer.js';
+import { RobotMapDrawer } from './lib/RobotMapDrawer.js';
 
 // 2000 x 901
 const mapImgUrl =
