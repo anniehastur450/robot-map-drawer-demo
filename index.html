@@ -5,6 +5,12 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Robot Map Drawer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
     <script
       defer
       src="https://use.fontawesome.com/releases/v5.15.4/js/all.js"
@@ -17,12 +23,17 @@
         shortcuts: [
           // https://github.com/antfu/handle/blob/main/unocss.config.ts
           {
-            btn: 'b-0 b-none m-0 p-0 font-sans color-inherit bg-transparent cursor-pointer',
+            btn: 'b-0 b-none m-0 p-0 font-[inherit] color-inherit bg-transparent appearance-none cursor-pointer',
           },
         ],
         rules: [
           // custom rules...
         ],
+        theme: {
+          fontFamily: {
+            inter: ['Inter', 'sans-serif'],
+          },
+        },
         // presets: [
         //   // custom presets...
         // ],
@@ -35,47 +46,149 @@
       * {
         box-sizing: border-box;
       }
+      select.btn {
+        background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236B7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='m6 8 4 4 4-4'/%3E%3C/svg%3E");
+        background-position: right 0.5rem center;
+        background-repeat: no-repeat;
+        background-size: 1.5em 1.5em;
+        padding-right: 2.5rem;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      var el = () => document.getElementById('main-drawer');
+      function setAspect(f) {
+        el().style.aspectRatio = f;
+      }
+      function tryFullscreen() {
+        el()
+          .requestFullscreen()
+          .catch(() => {
+            console.error(
+              'please try again in stand alone tab, in iframe it does work'
+            );
+          });
+      }
+    </script>
     <div class="flex flex-col lg:flex-row">
       <div class="w-full lg:max-w-2xl xl:max-w-4xl 2xl:max-w-6xl">
-        Robot Map Drawer
-        <div class="b b-solid b-gray-200">
-          <div id="main-drawer" class="aspect-80/36 w-full"></div>
+        <div class="lg:h-full lg:flex lg:flex-col-reverse">
+          <!-- use so many wrapper to achieve this: drawer sticky only if its height less than screen height -->
+          <div class="lg:sticky lg:bottom-0 lg:min-h-screen">
+            <div class="lg:sticky lg:top-0">
+              Robot Map Drawer
+              <div class="b b-solid b-gray-200">
+                <div id="main-drawer" class="aspect-80/36 w-full"></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
       <div class="lg:ml-4">
-        <h2 class="lg:mt-0">Debug</h2>
-        <script>
-          window.el = () => document.getElementById('main-drawer');
-        </script>
         <div>
-          <button onclick="el().style.aspectRatio='3/4'">aspect-3/4</button>
-          <button onclick="el().style.aspectRatio='4/3'">aspect-4/3</button>
-          <button onclick="el().style.aspectRatio='16/9'">aspect-16/9</button>
-          <button onclick="el().style.aspectRatio='80/36'">aspect-80/36</button>
-          <button onclick="el().style.aspectRatio='32/9'">aspect-32/9</button>
-          <button onclick="el().style.aspectRatio='5/1'">aspect-5/1</button>
-          <button onclick="el().requestFullscreen()">Full Screen</button>
-          <br /><br />
-          <button onclick="">Map_1</button>
-          <button onclick="">Map_2</button>
-          <button onclick="">Map_3</button>
+          <h2 class="lg:mt-0">Debug</h2>
           <div>
-            <div class="hidden xs:block">xs</div>
-            <div class="hidden sm:block">sm</div>
-            <div class="hidden md:block">md</div>
-            <div class="hidden lg:block">lg</div>
-            <div class="hidden xl:block">xl</div>
-            <div class="hidden 2xl:block">2xl</div>
-            <div class="hidden 3xl:block">3xl</div>
+            <button onclick="setAspect('3/4')">aspect-3/4</button>
+            <button onclick="setAspect('4/3')">aspect-4/3</button>
+            <button onclick="setAspect('16/9')">aspect-16/9</button>
+            <button onclick="setAspect('80/36')">aspect-80/36</button>
+            <button onclick="setAspect('32/9')">aspect-32/9</button>
+            <button onclick="setAspect('5/1')">aspect-5/1</button>
+            <button onclick="tryFullscreen()">Full Screen</button>
           </div>
-          <div class="h-[1024px] bg-amber/50">dummy element height 1024px</div>
+          <div id="debug-content" class="mt-4"></div>
         </div>
-        <div id="debug"></div>
+        <div>
+          <h2>Test items</h2>
+          <h3 class="m-0">UI Control</h3>
+          <ol class="my-2">
+            <li>click & drag to pan (ensure only left click could work)</li>
+            <li>zoom with wheel, zoom origin is cursor position</li>
+            <li>
+              touch screen support, pan by drag with 1 fingertip, zoom by pinch
+              or spread with 2 or more fingers
+            </li>
+            <li>
+              inertia panning (mouse or touch) & inertia zooming (touch only
+              feature), (other names of this: Kinetic Scrolling)
+            </li>
+          </ol>
+          <h3 class="m-0 mt-4">Rendering</h3>
+          <ol>
+            <li>
+              zoom level 100% is always fitting the full map within drawer, no
+              matter what aspect ratio (like object-fit contain)
+            </li>
+          </ol>
+        </div>
       </div>
     </div>
+    <script>
+      console.log('hi');
+      function parseUnits(units, mapUnit) {
+        const res = { [mapUnit]: 1 };
+        const unitMap = new Map(Object.entries(units));
+        const stack = [mapUnit];
+        function add(unit, scale) {
+          if (unit in res) {
+            console.warn(`redefinition of unit ${unit}: ${scale}`);
+          }
+          res[unit] = scale;
+          stack.push(unit);
+        }
+        while (stack.length > 0) {
+          const target = stack.pop();
+          const val = res[target];
+          for (const [r, [s, t]] of [...unitMap.entries()]) {
+            if ([r, t].includes('in')) console.log('aaa', r, s, t, target, val);
+            if (r === target) {
+              add(t, val * s);
+              unitMap.delete(r);
+            }
+            if (t === target) {
+              add(r, val / s);
+              unitMap.delete(r);
+            }
+          }
+        }
+        if (unitMap.size > 0) {
+          const s = [...unitMap.entries()]
+            .map(([r, [s, t]]) => `${r} = ${s} ${t}`)
+            .join();
+          console.warn(`unknown units: ${s}`);
+        }
+        return res;
+      }
+
+      console.log(
+        parseUnits(
+          {
+            µm: [1000, 'nm'], // 1 µm = 1000 nm
+            mm: [1000, 'µm'], // 1 mm = 1000 µm
+            cm: [10, 'mm'], // 1 cm = 10 mm
+            m: [100, 'cm'], // 1 m = 100 cm
+            km: [1000, 'm'], // 1 km = 1000 m
+          },
+          'm'
+        )
+      );
+      console.log(
+        parseUnits(
+          {
+            m: [100, 'cm'],
+            in: [2.54, 'cm'],
+            ft: [12, 'in'],
+            yd: [3, 'ft'],
+            mi: [1760, 'yd'],
+          },
+          'm'
+          // 1 m = 100 cm, 1 in = 2.54 cm, 1 m =
+        )
+      );
+    </script>
   </body>
 </html>

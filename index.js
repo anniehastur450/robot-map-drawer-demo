@@ -1,6 +1,7 @@
 // Import stylesheets
 import './style.css';
 import { RobotMapDrawer } from './lib/RobotMapDrawer.js';
+import { h, attr, events } from './lib/dom-helper.js';
 
 // 2000 x 901
 const mapImgUrl =
@@ -41,6 +42,34 @@ const robots = [
 for (const [name, x, y, color] of robots) {
   markers.add(null, { name, x, y, color }); // null means id is auto generated
 }
+
+// debug content
+h`
+  <div class="font-inter">
+    <div class="flex">
+      <label>
+        <div class="text-xs text-gray-500 mb-1">
+          Select a map
+        </div>
+        <select class="btn b b-solid b-gray-300 bg-white rounded-md px-4 py-2 text-sm text-gray-700 font-medium shadow-sm hover:bg-gray-50">
+          <option class="text-base">Map 1: basic usage</option>
+          <option class="text-base">haha2</option>
+        </select>
+      </label>
+      <div class="ml-4 text-gray-900">
+        <div class="text-xs text-gray-500 mb-1">
+          Map description
+        </div>
+        <h3 class="m-0">Map 1: basic usage</h3>
+        <p class="my-2 text-sm">
+          A showcase of basic function, pan, zoom, map markers, marker clusters, off-screen marker indicators, and hover popup.
+        </p>
+      </div>
+    </div>
+    <div></div>
+    123
+  </div>
+`.attach(document.getElementById('debug-content'));
 
 // Write Javascript code!
 const appDiv = document.getElementById('app');
