@@ -116,6 +116,14 @@
               inertia panning (mouse or touch) & inertia zooming (touch only
               feature), (other names of this: Kinetic Scrolling)
             </li>
+            <li>
+              zoom level display is rounded, edit it can show the full precision
+              <ul>
+                <li>click zoom level button to edit, will select all</li>
+                <li>when editing, blur or Enter to apply, Esc to cancel</li>
+                <li>Enter or Esc stays focus on the zoom level button</li>
+              </ul>
+            </li>
           </ol>
           <h3 class="m-0 mt-4">Rendering</h3>
           <ol>
@@ -127,68 +135,5 @@
         </div>
       </div>
     </div>
-    <script>
-      console.log('hi');
-      function parseUnits(units, mapUnit) {
-        const res = { [mapUnit]: 1 };
-        const unitMap = new Map(Object.entries(units));
-        const stack = [mapUnit];
-        function add(unit, scale) {
-          if (unit in res) {
-            console.warn(`redefinition of unit ${unit}: ${scale}`);
-          }
-          res[unit] = scale;
-          stack.push(unit);
-        }
-        while (stack.length > 0) {
-          const target = stack.pop();
-          const val = res[target];
-          for (const [r, [s, t]] of [...unitMap.entries()]) {
-            if ([r, t].includes('in')) console.log('aaa', r, s, t, target, val);
-            if (r === target) {
-              add(t, val * s);
-              unitMap.delete(r);
-            }
-            if (t === target) {
-              add(r, val / s);
-              unitMap.delete(r);
-            }
-          }
-        }
-        if (unitMap.size > 0) {
-          const s = [...unitMap.entries()]
-            .map(([r, [s, t]]) => `${r} = ${s} ${t}`)
-            .join();
-          console.warn(`unknown units: ${s}`);
-        }
-        return res;
-      }
-
-      console.log(
-        parseUnits(
-          {
-            µm: [1000, 'nm'], // 1 µm = 1000 nm
-            mm: [1000, 'µm'], // 1 mm = 1000 µm
-            cm: [10, 'mm'], // 1 cm = 10 mm
-            m: [100, 'cm'], // 1 m = 100 cm
-            km: [1000, 'm'], // 1 km = 1000 m
-          },
-          'm'
-        )
-      );
-      console.log(
-        parseUnits(
-          {
-            m: [100, 'cm'],
-            in: [2.54, 'cm'],
-            ft: [12, 'in'],
-            yd: [3, 'ft'],
-            mi: [1760, 'yd'],
-          },
-          'm'
-          // 1 m = 100 cm, 1 in = 2.54 cm, 1 m =
-        )
-      );
-    </script>
   </body>
 </html>
