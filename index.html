@@ -23,7 +23,7 @@
         shortcuts: [
           // https://github.com/antfu/handle/blob/main/unocss.config.ts
           {
-            btn: 'b-0 b-none m-0 p-0 font-[inherit] color-inherit bg-transparent appearance-none cursor-pointer',
+            btn: 'b-0 b-none m-0 p-0 font-[inherit] -outline-offset-1 color-inherit bg-transparent appearance-none cursor-pointer',
           },
         ],
         rules: [
@@ -88,7 +88,7 @@
           </div>
         </div>
       </div>
-      <div class="lg:ml-4">
+      <div class="lg:ml-4 lg:w-xs xl:w-md lg:grow-1 lg:shrink-0">
         <div>
           <h2 class="lg:mt-0">Debug</h2>
           <div>
@@ -119,7 +119,8 @@
             <li>
               zoom level display is rounded, edit it can show the full precision
               <ul>
-                <li>click zoom level button to edit, will select all</li>
+                <li>click zoom level button to edit, auto select all</li>
+                <li>zoom or touch the map can blur the editing text field</li>
                 <li>when editing, blur or Enter to apply, Esc to cancel</li>
                 <li>Enter or Esc stays focus on the zoom level button</li>
               </ul>
@@ -131,6 +132,10 @@
               zoom level 100% is always fitting the full map within drawer, no
               matter what aspect ratio (like object-fit contain)
             </li>
+          </ol>
+          <h3 class="m-0 mt-4">API</h3>
+          <ol>
+            <li></li>
           </ol>
         </div>
       </div>
