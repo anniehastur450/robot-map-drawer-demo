@@ -27,8 +27,8 @@ function select(i) {
 
 // debug content
 h`
-  <div class="font-inter">
-    <div class="flex flex-wrap gap-x-4 gap-y-2">
+  <div class="font-inter b-2 b-solid b-amber-200 rounded -mx-2 my-2 px-2 py-2 bg-amber-100">
+    <div class="flex flex-wrap items-start gap-x-4 gap-y-2">
       <label class="grow-1 w-44">
         <div class="text-xs text-gray-500 mb-1">
           Select a map
@@ -49,8 +49,9 @@ h`
         <p class="my-2 text-sm" ${attr((el) => (descEl = el))} ></p>
       </div>
     </div>
-    <div></div>
-    123
+    <div>
+    
+    </div>
   </div>
 `.attach(document.getElementById('debug-content'));
 
