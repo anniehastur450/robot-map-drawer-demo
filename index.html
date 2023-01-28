@@ -58,7 +58,6 @@
     </style>
   </head>
   <body>
-    <canvas id="aaa" width="600" height="400"></canvas>
     <div id="app"></div>
     <script>
       var el = () => document.getElementById('main-drawer');
@@ -142,50 +141,5 @@
         </div>
       </div>
     </div>
-    <script>
-      let aaa = document.getElementById('aaa');
-      let [w, h] = [aaa.width, aaa.height];
-      let ctx = aaa.getContext('2d');
-      console.log(ctx);
-      function hexagonTile(x, y, d) {
-        const split = (num) => [Math.floor(num), num - Math.floor(num)];
-        const c = (r) => x / (Math.sqrt(3) * d) + (r % 2 === 0 ? 0.5 : 0); // even 0.5, odd 0
-        const [u, f] = split(y / (1.5 * d) + 1 / 3);
-        let row = u;
-        if (f > 2 / 3) {
-          let [, f2] = split(c(row));
-          if (f2 > 0.5) f2 = 1 - f2;
-          row += f2 * 2 > (f - 2 / 3) * 3 ? 0 : 1;
-        }
-        let col = Math.floor(c(row));
-        return [row, col];
-      }
-      function drawPixel(context, x, y, color) {
-        var roundedX = Math.round(x);
-        var roundedY = Math.round(y);
-        context.fillStyle = color || '#000';
-        context.fillRect(roundedX, roundedY, 1, 1);
-      }
-      function randomColor() {
-        return `hsl(${360 * Math.random()},100%,50%)`;
-      }
-      const colorMap = new Map();
-      function f() {
-        for (let i = 0; i < 10000; i++) {
-          const x = Math.random() * w;
-          const y = Math.random() * h;
-          const [r, c] = hexagonTile(x - w / 2, y - h / 2, 50);
-          const key = `${Math.abs(r)},${Math.abs(c)}`;
-          if (!colorMap.has(key)) {
-            colorMap.set(key, randomColor());
-          }
-          const color = colorMap.get(key);
-          drawPixel(ctx, x, y, color);
-        }
-        requestAnimationFrame(f);
-      }
-      f();
-      console.log(hexagonTile(5, 5, 50));
-    </script>
   </body>
 </html>
