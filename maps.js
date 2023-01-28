@@ -14,7 +14,7 @@ const definedMaps = [
         focusingZoom: 300,
       };
     },
-    markers: [
+    getMarkers: () => [
       ['🤖 1', /*       */ -25.6, 15, '#D0C7D9'],
       ['🤖 2', /*       */ -23.6, 15, '#D0C7D9'],
       ['🤖 3', /*       */ -23.6, 13, '#D0C7D9'],
@@ -30,6 +30,41 @@ const definedMaps = [
       ['🐕 1', /*        */ 15, 15.7, '#F2CEA2'],
       ['🐕 2', /*       */ 15.4, -16, '#F2CEA2'],
     ],
+    userViewOptions: {
+      origin: 'center',
+      '+x': 'right',
+      '+y': 'top', // use math axis: postive y is up and positive x is right
+    },
+  },
+  {
+    title: 'basic usage 2',
+    description:
+      'A showcase of basic function, pan, zoom, map markers, marker clusters, off-screen marker indicators, and hover popup.',
+    getMapConfig: () => {
+      // 1600 x 1020
+      const mapImgUrl =
+        'https://storage.googleapis.com/raremaps/img/xlarge/54621.jpg';
+      const mapSize = [4755, (4755 / 1600) * 1020]; // w x h
+      return {
+        mapImgUrl,
+        mapSize,
+        mapUnit: 'km',
+        focusingZoom: 300,
+      };
+    },
+    getMarkers: () => {
+      // TODO performance issue for large amount of markers
+      const [mapW, mapH] = [4755, (4755 / 1600) * 1020];
+      const robotMilitary = [];
+      for (let i = 0; i < 500; i++) {
+        const a = ['🤖', '🦾', '🦿'];
+        const f = a[Math.floor(Math.random() * a.length)];
+        const x = mapW * (Math.random() - 0.5);
+        const y = mapH * (Math.random() - 0.5);
+        robotMilitary.push([`${f} ${i}`, x, y]);
+      }
+      return robotMilitary;
+    },
     userViewOptions: {
       origin: 'center',
       '+x': 'right',

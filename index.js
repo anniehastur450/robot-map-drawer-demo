@@ -10,7 +10,7 @@ function loadMap(mapData) {
   const drawer = new RobotMapDrawer(mapData.getMapConfig());
   drawer.attach(main);
   const view = drawer.getUserView(mapData.userViewOptions);
-  const robots = mapData.markers;
+  const robots = mapData.getMarkers();
   for (const [name, x, y, color] of robots) {
     view.addMarker(null, { name, x, y, color }); // null means id is auto generated
   }
